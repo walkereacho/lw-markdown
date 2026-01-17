@@ -5,6 +5,15 @@ final class MainWindowController: NSWindowController {
     /// Tab manager for document lifecycle.
     let tabManager = TabManager()
 
+    /// Workspace manager for file tree.
+    let workspaceManager = WorkspaceManager()
+
+    /// Sidebar controller.
+    private(set) var sidebarController: SidebarController?
+
+    /// Split view for sidebar + editor.
+    private var splitView: NSSplitView?
+
     /// Tab bar view.
     private(set) var tabBarView: TabBarView?
 
@@ -23,44 +32,70 @@ final class MainWindowController: NSWindowController {
 
     private func setupWindow() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 700),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Markdown Editor"
         window.center()
+        window.minSize = NSSize(width: 600, height: 400)
 
-        // Create container for tab bar + editor
-        let containerView = NSView()
-        containerView.translatesAutoresizingMaskIntoConstraints = false
+        // Main split view (sidebar | editor area)
+        let split = NSSplitView()
+        split.isVertical = true
+        split.dividerStyle = .thin
+        split.autoresizingMask = [.width, .height]
+        self.splitView = split
+
+        // Sidebar
+        let sidebar = SidebarController()
+        sidebar.workspaceManager = workspaceManager
+        sidebar.onFileSelected = { [weak self] url in
+            try? self?.openFile(at: url)
+        }
+        self.sidebarController = sidebar
+
+        let sidebarView = sidebar.view
+        sidebarView.setFrameSize(NSSize(width: 220, height: 700))
+        split.addArrangedSubview(sidebarView)
+
+        // Editor area (tab bar + editor)
+        let editorArea = NSView()
+        editorArea.translatesAutoresizingMaskIntoConstraints = false
 
         // Tab bar
         let tabBar = TabBarView()
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         tabBar.tabManager = tabManager
         self.tabBarView = tabBar
-        containerView.addSubview(tabBar)
+        editorArea.addSubview(tabBar)
 
         // Editor
         editorViewController = EditorViewController()
         let editorView = editorViewController.view
         editorView.translatesAutoresizingMaskIntoConstraints = false
-        containerView.addSubview(editorView)
+        editorArea.addSubview(editorView)
 
         NSLayoutConstraint.activate([
-            tabBar.topAnchor.constraint(equalTo: containerView.topAnchor),
-            tabBar.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-            tabBar.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            tabBar.topAnchor.constraint(equalTo: editorArea.topAnchor),
+            tabBar.leadingAnchor.constraint(equalTo: editorArea.leadingAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: editorArea.trailingAnchor),
             tabBar.heightAnchor.constraint(equalToConstant: 32),
 
             editorView.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-            editorView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-            editorView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-            editorView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
+            editorView.leadingAnchor.constraint(equalTo: editorArea.leadingAnchor),
+            editorView.trailingAnchor.constraint(equalTo: editorArea.trailingAnchor),
+            editorView.bottomAnchor.constraint(equalTo: editorArea.bottomAnchor)
         ])
 
-        window.contentView = containerView
+        split.addArrangedSubview(editorArea)
+
+        // Set holding priorities so sidebar keeps size when resizing
+        split.setHoldingPriority(.defaultLow, forSubviewAt: 0)
+        split.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
+
+        window.contentView = split
         self.window = window
     }
 
