@@ -190,6 +190,10 @@ final class MarkdownParser: TokenProviding {
             excluding: excludedRanges
         )
         tokens.append(contentsOf: italicUnderscoreTokens)
+        excludedRanges.append(contentsOf: italicUnderscoreTokens.map { rangeFromToken($0) })
+
+        // Links [text](url)
+        tokens.append(contentsOf: parseLinks(in: text, excluding: excludedRanges))
 
         return tokens
     }
@@ -329,6 +333,49 @@ final class MarkdownParser: TokenProviding {
                 }
             }
             i += 1
+        }
+
+        return tokens
+    }
+
+    private func parseLinks(in text: String, excluding: [Range<Int>]) -> [MarkdownToken] {
+        var tokens: [MarkdownToken] = []
+
+        // Pattern: [text](url)
+        let pattern = #/\[([^\]]+)\]\(([^)]+)\)/#
+
+        for match in text.matches(of: pattern) {
+            let start = text.distance(from: text.startIndex, to: match.range.lowerBound)
+            let end = text.distance(from: text.startIndex, to: match.range.upperBound)
+
+            // Skip if overlaps with excluded ranges
+            let overlapsExcluded = excluding.contains { excluded in
+                start < excluded.upperBound && end > excluded.lowerBound
+            }
+            if overlapsExcluded { continue }
+
+            // Extract URL
+            let url = String(match.2)
+
+            // Find the bracket positions
+            let fullText = String(text[match.range])
+            guard let closeBracketIndex = fullText.firstIndex(of: "]") else { continue }
+
+            let bracketOffset = fullText.distance(from: fullText.startIndex, to: closeBracketIndex)
+
+            let contentStart = start + 1  // After [
+            let contentEnd = start + bracketOffset  // Before ]
+            let urlEnd = end - 1  // Before )
+
+            tokens.append(MarkdownToken(
+                element: .link(url: url),
+                contentRange: contentStart..<contentEnd,
+                syntaxRanges: [
+                    start..<(start + 1),           // [
+                    contentEnd..<(contentEnd + 2),  // ](
+                    urlEnd..<end                    // )
+                ]
+            ))
         }
 
         return tokens
