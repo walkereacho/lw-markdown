@@ -30,4 +30,13 @@ final class TabIntegrationTests: XCTestCase {
         XCTAssertEqual(controller.tabManager.tabs.count, 1)
         XCTAssertEqual(controller.tabManager.tabs.first?.title, testFile.lastPathComponent)
     }
+
+    func testTabBarViewConnected() {
+        let controller = MainWindowController()
+        controller.newDocument()
+        controller.newDocument()
+
+        // Tab bar should reflect tab count
+        XCTAssertEqual(controller.tabBarView?.tabManager?.tabs.count, 2)
+    }
 }

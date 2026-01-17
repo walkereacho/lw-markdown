@@ -5,6 +5,9 @@ final class MainWindowController: NSWindowController {
     /// Tab manager for document lifecycle.
     let tabManager = TabManager()
 
+    /// Tab bar view.
+    private(set) var tabBarView: TabBarView?
+
     /// Editor view controller.
     private var editorViewController: EditorViewController!
 
@@ -28,9 +31,36 @@ final class MainWindowController: NSWindowController {
         window.title = "Markdown Editor"
         window.center()
 
-        editorViewController = EditorViewController()
-        window.contentViewController = editorViewController
+        // Create container for tab bar + editor
+        let containerView = NSView()
+        containerView.translatesAutoresizingMaskIntoConstraints = false
 
+        // Tab bar
+        let tabBar = TabBarView()
+        tabBar.translatesAutoresizingMaskIntoConstraints = false
+        tabBar.tabManager = tabManager
+        self.tabBarView = tabBar
+        containerView.addSubview(tabBar)
+
+        // Editor
+        editorViewController = EditorViewController()
+        let editorView = editorViewController.view
+        editorView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(editorView)
+
+        NSLayoutConstraint.activate([
+            tabBar.topAnchor.constraint(equalTo: containerView.topAnchor),
+            tabBar.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            tabBar.heightAnchor.constraint(equalToConstant: 32),
+
+            editorView.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            editorView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            editorView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            editorView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
+        ])
+
+        window.contentView = containerView
         self.window = window
     }
 
@@ -41,11 +71,13 @@ final class MainWindowController: NSWindowController {
                   let docId = documentId,
                   let document = self.tabManager.document(for: docId) else { return }
             self.editorViewController.loadDocument(document)
+            self.tabBarView?.updateTabs()
             self.updateWindowTitle()
         }
 
         // Handle close confirmation for dirty documents
         tabManager.onCloseConfirmation = { [weak self] document in
+            self?.tabBarView?.rebuildTabs()
             return self?.confirmClose(document: document) ?? true
         }
     }
@@ -55,12 +87,14 @@ final class MainWindowController: NSWindowController {
     func newDocument() {
         let document = tabManager.newDocument()
         editorViewController.loadDocument(document)
+        tabBarView?.rebuildTabs()
         updateWindowTitle()
     }
 
     func openFile(at url: URL) throws {
         let document = try tabManager.openFile(at: url)
         editorViewController.loadDocument(document)
+        tabBarView?.rebuildTabs()
         updateWindowTitle()
     }
 
