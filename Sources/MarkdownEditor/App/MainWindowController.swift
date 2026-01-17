@@ -181,6 +181,31 @@ final class MainWindowController: NSWindowController {
         }
     }
 
+    // MARK: - Workspace Operations
+
+    func openWorkspace(at url: URL) {
+        do {
+            try workspaceManager.mountWorkspace(at: url)
+            sidebarController?.refresh()
+            window?.title = "\(url.lastPathComponent) — Markdown Editor"
+        } catch {
+            showError(error)
+        }
+    }
+
+    func openWorkspace() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a folder to open as workspace"
+
+        panel.beginSheetModal(for: window!) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.openWorkspace(at: url)
+        }
+    }
+
     // MARK: - UI Refresh
 
     /// Refresh UI elements (title, tabs) to reflect current state.

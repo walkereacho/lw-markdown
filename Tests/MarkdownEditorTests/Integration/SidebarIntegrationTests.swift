@@ -27,4 +27,22 @@ final class SidebarIntegrationTests: XCTestCase {
         XCTAssertEqual(controller.tabManager.tabs.count, 1)
         XCTAssertEqual(controller.tabManager.tabs.first?.filePath, testFile)
     }
+
+    func testOpenWorkspaceUpdatesFileTree() throws {
+        let controller = MainWindowController()
+
+        // Create temp workspace
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test-workspace-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        try "# File 1".write(to: tempDir.appendingPathComponent("file1.md"), atomically: true, encoding: .utf8)
+        try "# File 2".write(to: tempDir.appendingPathComponent("file2.md"), atomically: true, encoding: .utf8)
+
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        controller.openWorkspace(at: tempDir)
+
+        XCTAssertEqual(controller.workspaceManager.workspaceRoot, tempDir)
+        XCTAssertNotNil(controller.workspaceManager.fileTree())
+    }
 }
