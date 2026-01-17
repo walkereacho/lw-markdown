@@ -29,6 +29,12 @@ final class EditorViewController: NSViewController {
         loadDocument(DocumentModel())
     }
 
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        // Make text view first responder once view is in a window
+        view.window?.makeFirstResponder(paneController?.textView)
+    }
+
     private func setupScrollView() {
         scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
