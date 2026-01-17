@@ -181,6 +181,14 @@ final class MainWindowController: NSWindowController {
         }
     }
 
+    // MARK: - UI Refresh
+
+    /// Refresh UI elements (title, tabs) to reflect current state.
+    func refreshUI() {
+        updateWindowTitle()
+        tabBarView?.updateTabs()
+    }
+
     // MARK: - Window Title
 
     private func updateWindowTitle() {

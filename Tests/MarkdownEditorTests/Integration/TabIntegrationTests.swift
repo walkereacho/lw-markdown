@@ -62,4 +62,22 @@ final class TabIntegrationTests: XCTestCase {
 
         XCTAssertFalse(document.isDirty)
     }
+
+    func testDirtyStateUpdatesWindowTitle() {
+        let controller = MainWindowController()
+        controller.newDocument()
+
+        guard let document = controller.tabManager.activeDocument else {
+            XCTFail("No active document")
+            return
+        }
+
+        // Simulate edit
+        document.isDirty = true
+
+        // Force title update
+        controller.refreshUI()
+
+        XCTAssertTrue(controller.window?.title.contains("•") ?? false)
+    }
 }
