@@ -37,7 +37,8 @@ final class MarkdownParser: TokenProviding {
             return tokens
         }
 
-        // TODO: Parse inline elements
+        // Parse inline elements
+        tokens.append(contentsOf: parseInlineElements(text))
 
         return tokens
     }
@@ -129,5 +130,207 @@ final class MarkdownParser: TokenProviding {
         }
 
         return nil
+    }
+
+    // MARK: - Inline Parsing
+
+    private func parseInlineElements(_ text: String) -> [MarkdownToken] {
+        var tokens: [MarkdownToken] = []
+        var excludedRanges: [Range<Int>] = []
+
+        // Parse inline code first (contents should not be parsed for emphasis)
+        let codeRanges = parseInlineCode(text)
+        tokens.append(contentsOf: codeRanges.map { $0.token })
+        excludedRanges.append(contentsOf: codeRanges.map { $0.fullRange })
+
+        // Bold italic first (***text***) - must be parsed before bold/italic
+        let boldItalicTokens = parseEmphasis(
+            in: text,
+            pattern: #/\*\*\*(.+?)\*\*\*/#,
+            element: .boldItalic,
+            syntaxLength: 3,
+            excluding: excludedRanges
+        )
+        tokens.append(contentsOf: boldItalicTokens)
+        excludedRanges.append(contentsOf: boldItalicTokens.map { rangeFromToken($0) })
+
+        // Bold (**text** or __text__)
+        let boldAsteriskTokens = parseEmphasis(
+            in: text,
+            pattern: #/\*\*(.+?)\*\*/#,
+            element: .bold,
+            syntaxLength: 2,
+            excluding: excludedRanges
+        )
+        tokens.append(contentsOf: boldAsteriskTokens)
+        excludedRanges.append(contentsOf: boldAsteriskTokens.map { rangeFromToken($0) })
+
+        let boldUnderscoreTokens = parseEmphasis(
+            in: text,
+            pattern: #/__(.+?)__/#,
+            element: .bold,
+            syntaxLength: 2,
+            excluding: excludedRanges
+        )
+        tokens.append(contentsOf: boldUnderscoreTokens)
+        excludedRanges.append(contentsOf: boldUnderscoreTokens.map { rangeFromToken($0) })
+
+        // Italic (*text* or _text_) - use manual parsing to handle adjacent bold markers
+        let italicAsteriskTokens = parseItalicManually(
+            in: text,
+            marker: "*",
+            excluding: excludedRanges
+        )
+        tokens.append(contentsOf: italicAsteriskTokens)
+        excludedRanges.append(contentsOf: italicAsteriskTokens.map { rangeFromToken($0) })
+
+        let italicUnderscoreTokens = parseItalicManually(
+            in: text,
+            marker: "_",
+            excluding: excludedRanges
+        )
+        tokens.append(contentsOf: italicUnderscoreTokens)
+
+        return tokens
+    }
+
+    private func rangeFromToken(_ token: MarkdownToken) -> Range<Int> {
+        // Get full range from syntax ranges (opening to closing)
+        guard let first = token.syntaxRanges.first,
+              let last = token.syntaxRanges.last else {
+            return token.contentRange
+        }
+        return first.lowerBound..<last.upperBound
+    }
+
+    private struct InlineCodeMatch {
+        let token: MarkdownToken
+        let fullRange: Range<Int>
+    }
+
+    private func parseInlineCode(_ text: String) -> [InlineCodeMatch] {
+        var matches: [InlineCodeMatch] = []
+
+        let pattern = #/`([^`]+)`/#
+
+        for match in text.matches(of: pattern) {
+            let start = text.distance(from: text.startIndex, to: match.range.lowerBound)
+            let end = text.distance(from: text.startIndex, to: match.range.upperBound)
+
+            let contentStart = start + 1
+            let contentEnd = end - 1
+
+            let token = MarkdownToken(
+                element: .inlineCode,
+                contentRange: contentStart..<contentEnd,
+                syntaxRanges: [start..<(start + 1), (end - 1)..<end]
+            )
+
+            matches.append(InlineCodeMatch(token: token, fullRange: start..<end))
+        }
+
+        return matches
+    }
+
+    private func parseEmphasis<Output>(
+        in text: String,
+        pattern: Regex<Output>,
+        element: MarkdownElement,
+        syntaxLength: Int,
+        excluding: [Range<Int>]
+    ) -> [MarkdownToken] {
+        var tokens: [MarkdownToken] = []
+
+        for match in text.matches(of: pattern) {
+            let start = text.distance(from: text.startIndex, to: match.range.lowerBound)
+            let end = text.distance(from: text.startIndex, to: match.range.upperBound)
+
+            // Skip if this range overlaps with excluded ranges (e.g., code)
+            let overlapsExcluded = excluding.contains { excluded in
+                start < excluded.upperBound && end > excluded.lowerBound
+            }
+            if overlapsExcluded { continue }
+
+            let contentStart = start + syntaxLength
+            let contentEnd = end - syntaxLength
+
+            tokens.append(MarkdownToken(
+                element: element,
+                contentRange: contentStart..<contentEnd,
+                syntaxRanges: [
+                    start..<(start + syntaxLength),
+                    (end - syntaxLength)..<end
+                ]
+            ))
+        }
+
+        return tokens
+    }
+
+    /// Parse italic matches using a character-by-character approach to handle
+    /// cases where regex fails due to asterisk consumption.
+    private func parseItalicManually(
+        in text: String,
+        marker: Character,
+        excluding: [Range<Int>]
+    ) -> [MarkdownToken] {
+        var tokens: [MarkdownToken] = []
+        var i = 0
+        let chars = Array(text)
+        let n = chars.count
+
+        while i < n {
+            // Skip if inside excluded range
+            if excluding.contains(where: { i >= $0.lowerBound && i < $0.upperBound }) {
+                i += 1
+                continue
+            }
+
+            // Look for single marker (not double)
+            if chars[i] == marker {
+                // Check it's not part of double/triple marker
+                let prevIsMarker = (i > 0 && chars[i - 1] == marker)
+                let nextIsMarker = (i + 1 < n && chars[i + 1] == marker)
+
+                if !prevIsMarker && !nextIsMarker {
+                    // Found opening marker, look for closing
+                    let openPos = i
+                    var j = i + 1
+
+                    // Find content (must be non-empty, no markers)
+                    while j < n && chars[j] != marker {
+                        // Stop if we hit an excluded range
+                        if excluding.contains(where: { j >= $0.lowerBound && j < $0.upperBound }) {
+                            break
+                        }
+                        j += 1
+                    }
+
+                    // Check for valid closing marker
+                    if j < n && chars[j] == marker && j > openPos + 1 {
+                        let prevIsMarkerClose = (j > 0 && chars[j - 1] == marker)
+                        let nextIsMarkerClose = (j + 1 < n && chars[j + 1] == marker)
+
+                        if !prevIsMarkerClose && !nextIsMarkerClose {
+                            // Valid italic match
+                            let closePos = j
+                            tokens.append(MarkdownToken(
+                                element: .italic,
+                                contentRange: (openPos + 1)..<closePos,
+                                syntaxRanges: [
+                                    openPos..<(openPos + 1),
+                                    closePos..<(closePos + 1)
+                                ]
+                            ))
+                            i = closePos + 1
+                            continue
+                        }
+                    }
+                }
+            }
+            i += 1
+        }
+
+        return tokens
     }
 }
