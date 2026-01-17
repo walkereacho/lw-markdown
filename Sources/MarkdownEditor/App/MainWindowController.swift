@@ -91,9 +91,10 @@ final class MainWindowController: NSWindowController {
 
         split.addArrangedSubview(editorArea)
 
-        // Set holding priorities so sidebar keeps size when resizing
-        split.setHoldingPriority(.defaultLow, forSubviewAt: 0)
-        split.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
+        // Set holding priorities so editor grows when resizing (sidebar stays fixed)
+        split.setHoldingPriority(.defaultHigh, forSubviewAt: 0)  // Sidebar holds its size
+        split.setHoldingPriority(.defaultLow, forSubviewAt: 1)   // Editor absorbs resize
+        split.delegate = self
 
         window.contentView = split
         self.window = window
@@ -259,5 +260,44 @@ final class MainWindowController: NSWindowController {
     private func showError(_ error: Error) {
         let alert = NSAlert(error: error)
         alert.runModal()
+    }
+}
+
+// MARK: - NSSplitViewDelegate
+
+extension MainWindowController: NSSplitViewDelegate {
+
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        // Minimum sidebar width
+        return 150
+    }
+
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        // Maximum sidebar width (leave at least 400px for editor)
+        return splitView.bounds.width - 400
+    }
+
+    func splitView(_ splitView: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) {
+        // Custom resize: sidebar keeps its width, editor gets the rest
+        guard splitView.subviews.count == 2 else {
+            splitView.adjustSubviews()
+            return
+        }
+
+        let sidebarView = splitView.subviews[0]
+        let editorView = splitView.subviews[1]
+        let dividerThickness = splitView.dividerThickness
+
+        // Keep sidebar at its current width (or default 220 if too small)
+        var sidebarWidth = sidebarView.frame.width
+        if sidebarWidth < 150 {
+            sidebarWidth = 220
+        }
+
+        let newWidth = splitView.bounds.width
+        let editorWidth = newWidth - sidebarWidth - dividerThickness
+
+        sidebarView.frame = NSRect(x: 0, y: 0, width: sidebarWidth, height: splitView.bounds.height)
+        editorView.frame = NSRect(x: sidebarWidth + dividerThickness, y: 0, width: editorWidth, height: splitView.bounds.height)
     }
 }
