@@ -39,4 +39,27 @@ final class TabIntegrationTests: XCTestCase {
         // Tab bar should reflect tab count
         XCTAssertEqual(controller.tabBarView?.tabManager?.tabs.count, 2)
     }
+
+    func testSaveDocumentUpdatesDirtyState() throws {
+        let controller = MainWindowController()
+        controller.newDocument()
+
+        guard let document = controller.tabManager.activeDocument else {
+            XCTFail("No active document")
+            return
+        }
+
+        // Create temp file for saving
+        let tempDir = FileManager.default.temporaryDirectory
+        let testFile = tempDir.appendingPathComponent("save-test-\(UUID().uuidString).md")
+        defer { try? FileManager.default.removeItem(at: testFile) }
+
+        document.filePath = testFile
+        document.contentStorage.attributedString = NSAttributedString(string: "# Test")
+        document.isDirty = true
+
+        controller.saveDocument()
+
+        XCTAssertFalse(document.isDirty)
+    }
 }
