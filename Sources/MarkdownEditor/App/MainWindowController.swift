@@ -18,7 +18,7 @@ final class MainWindowController: NSWindowController {
     private(set) var tabBarView: TabBarView?
 
     /// Editor view controller.
-    private var editorViewController: EditorViewController!
+    private(set) var editorViewController: EditorViewController!
 
     override init(window: NSWindow?) {
         super.init(window: nil)
