@@ -66,4 +66,29 @@ final class EditorViewController: NSViewController {
         // Make text view first responder
         view.window?.makeFirstResponder(paneController?.textView)
     }
+
+    // MARK: - Cursor Positioning (for testing)
+
+    /// Position cursor at the beginning of the specified line (1-indexed).
+    func setCursorLine(_ line: Int) {
+        guard let textView = paneController?.textView,
+              let textStorage = textView.textStorage,
+              line >= 1 else { return }
+
+        let text = textStorage.string
+        var currentLine = 1
+        var position = text.startIndex
+
+        // Find the start of the requested line
+        while currentLine < line && position < text.endIndex {
+            if text[position] == "\n" {
+                currentLine += 1
+            }
+            position = text.index(after: position)
+        }
+
+        // Convert String.Index to Int offset
+        let offset = text.distance(from: text.startIndex, to: position)
+        textView.setSelectedRange(NSRange(location: offset, length: 0))
+    }
 }

@@ -217,6 +217,13 @@ final class MainWindowController: NSWindowController {
         tabBarView?.updateTabs()
     }
 
+    // MARK: - Cursor Positioning (for testing)
+
+    /// Position cursor at the beginning of the specified line (1-indexed).
+    func setCursorLine(_ line: Int) {
+        editorViewController.setCursorLine(line)
+    }
+
     // MARK: - Window Title
 
     private func updateWindowTitle() {

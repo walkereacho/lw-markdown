@@ -11,8 +11,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMainMenu()
         openNewWindow()
 
+        // Process CLI arguments for testing
+        processTestArguments()
+
         // Bring app to front
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - CLI Test Arguments
+
+    private func processTestArguments() {
+        let args = CommandLine.arguments
+
+        // --window-size WxH (e.g., "1200x800")
+        if let sizeIndex = args.firstIndex(of: "--window-size"),
+           sizeIndex + 1 < args.count {
+            let sizeStr = args[sizeIndex + 1]
+            let parts = sizeStr.split(separator: "x")
+            if parts.count == 2,
+               let width = Int(parts[0]),
+               let height = Int(parts[1]) {
+                mainWindowController?.window?.setContentSize(NSSize(width: width, height: height))
+                mainWindowController?.window?.center()
+            }
+        }
+
+        // --test-file <path>
+        if let fileIndex = args.firstIndex(of: "--test-file"),
+           fileIndex + 1 < args.count {
+            let filePath = args[fileIndex + 1]
+            let url = URL(fileURLWithPath: filePath)
+            do {
+                try mainWindowController?.openFile(at: url)
+            } catch {
+                print("Error opening test file: \(error)")
+            }
+        }
+
+        // --cursor-line <N>
+        if let lineIndex = args.firstIndex(of: "--cursor-line"),
+           lineIndex + 1 < args.count,
+           let line = Int(args[lineIndex + 1]) {
+            mainWindowController?.setCursorLine(line)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

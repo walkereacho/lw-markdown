@@ -32,3 +32,7 @@ DerivedData/
 
 # Git worktrees
 .worktrees/
+
+# E2E test screenshots (generated)
+docs/screenshots/test-runs/*.jpg
+docs/screenshots/test-runs/*.png
