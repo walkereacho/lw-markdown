@@ -32,7 +32,7 @@ struct MarkdownToken {
 
 /// Markdown element types supported by the editor.
 /// Parser module must handle all of these.
-enum MarkdownElement {
+enum MarkdownElement: Equatable {
     case text
     case heading(level: Int)           // # through ######
     case bold                          // **text** or __text__
