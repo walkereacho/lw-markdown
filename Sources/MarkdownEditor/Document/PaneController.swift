@@ -32,7 +32,7 @@ final class PaneController: NSObject {
     let textContainer: NSTextContainer
 
     /// Layout delegate providing custom fragments.
-    private let layoutDelegate: MarkdownLayoutManagerDelegate
+    private(set) var layoutDelegate: MarkdownLayoutManagerDelegate
 
     /// PANE-LOCAL active paragraph index.
     /// Different panes can have cursor in different paragraphs.
@@ -70,6 +70,9 @@ final class PaneController: NSObject {
         // Wire up delegate references
         layoutDelegate.paneController = self
         textView.delegate = self
+
+        // Inject parser for live Markdown rendering
+        layoutDelegate.tokenProvider = MarkdownParser.shared
 
         // Configure text view
         configureTextView()
