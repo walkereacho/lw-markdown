@@ -53,4 +53,48 @@ final class WorkspaceManagerTests: XCTestCase {
         XCTAssertNotNil(tree.children)
         XCTAssertEqual(tree.children?.count, 2)  // file1.md and subdir
     }
+
+    func testSearchFilesMatchingPattern() throws {
+        // Create test files with various names
+        let subdir = tempDir.appendingPathComponent("subdir")
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+        try "test".write(to: tempDir.appendingPathComponent("readme.md"), atomically: true, encoding: .utf8)
+        try "test".write(to: tempDir.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        try "test".write(to: subdir.appendingPathComponent("readme.txt"), atomically: true, encoding: .utf8)
+
+        let manager = WorkspaceManager()
+        try manager.mountWorkspace(at: tempDir)
+
+        // Search for "readme"
+        let results = manager.searchFiles(matching: "readme")
+        XCTAssertEqual(results.count, 2)
+        XCTAssertTrue(results.allSatisfy { $0.lastPathComponent.lowercased().contains("readme") })
+    }
+
+    func testSearchFilesIsCaseInsensitive() throws {
+        try "test".write(to: tempDir.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+        let manager = WorkspaceManager()
+        try manager.mountWorkspace(at: tempDir)
+
+        let results = manager.searchFiles(matching: "readme")
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results.first?.lastPathComponent, "README.md")
+    }
+
+    func testSearchFilesReturnsEmptyWhenNoWorkspace() {
+        let manager = WorkspaceManager()
+        let results = manager.searchFiles(matching: "test")
+        XCTAssertTrue(results.isEmpty)
+    }
+
+    func testMountNonDirectoryThrows() {
+        let manager = WorkspaceManager()
+        let filePath = tempDir.appendingPathComponent("file.txt")
+        try? "test".write(to: filePath, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try manager.mountWorkspace(at: filePath)) { error in
+            XCTAssertTrue(error is WorkspaceError)
+        }
+    }
 }
