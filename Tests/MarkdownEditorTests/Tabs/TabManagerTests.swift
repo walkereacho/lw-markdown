@@ -1,0 +1,76 @@
+import XCTest
+@testable import MarkdownEditor
+
+final class TabManagerTests: XCTestCase {
+
+    func testOpenDocument() {
+        let manager = TabManager()
+        let document = DocumentModel()
+
+        manager.openDocument(document)
+
+        XCTAssertEqual(manager.tabs.count, 1)
+        XCTAssertEqual(manager.activeDocumentId, document.id)
+    }
+
+    func testOpenMultipleDocuments() {
+        let manager = TabManager()
+        let doc1 = DocumentModel()
+        let doc2 = DocumentModel()
+
+        manager.openDocument(doc1)
+        manager.openDocument(doc2)
+
+        XCTAssertEqual(manager.tabs.count, 2)
+        XCTAssertEqual(manager.activeDocumentId, doc2.id)  // Most recent is active
+    }
+
+    func testCloseTab() {
+        let manager = TabManager()
+        let document = DocumentModel()
+
+        manager.openDocument(document)
+        let closed = manager.closeTab(documentId: document.id)
+
+        XCTAssertTrue(closed)
+        XCTAssertEqual(manager.tabs.count, 0)
+        XCTAssertNil(manager.activeDocumentId)
+    }
+
+    func testActivateTab() {
+        let manager = TabManager()
+        let doc1 = DocumentModel()
+        let doc2 = DocumentModel()
+
+        manager.openDocument(doc1)
+        manager.openDocument(doc2)
+
+        manager.activateTab(documentId: doc1.id)
+
+        XCTAssertEqual(manager.activeDocumentId, doc1.id)
+    }
+
+    func testTabInfo() {
+        let manager = TabManager()
+        let document = DocumentModel()
+        document.filePath = URL(fileURLWithPath: "/path/to/file.md")
+
+        manager.openDocument(document)
+
+        let tab = manager.tabs.first
+        XCTAssertNotNil(tab)
+        XCTAssertEqual(tab?.title, "file.md")
+        XCTAssertFalse(tab?.isDirty ?? true)
+    }
+
+    func testDirtyState() {
+        let manager = TabManager()
+        let document = DocumentModel()
+
+        manager.openDocument(document)
+        document.isDirty = true
+
+        let tab = manager.tabs.first
+        XCTAssertTrue(tab?.isDirty ?? false)
+    }
+}
