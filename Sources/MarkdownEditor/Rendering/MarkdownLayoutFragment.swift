@@ -165,10 +165,18 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     private func drawAttributedString(_ string: NSAttributedString, at point: CGPoint, in context: CGContext) {
         let line = CTLineCreateWithAttributedString(string)
 
+        // Get line metrics to properly position text
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        var leading: CGFloat = 0
+        CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+
         context.saveGState()
-        // Flip coordinate system for Core Text
+        // Core Text uses a flipped coordinate system (y increases upward)
+        // NSView/CALayer uses y increasing downward
+        // We need to flip and offset by ascent to draw from top-left
         context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-        context.textPosition = point
+        context.textPosition = CGPoint(x: point.x, y: point.y + ascent)
         CTLineDraw(line, context)
         context.restoreGState()
     }

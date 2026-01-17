@@ -61,8 +61,10 @@ final class MainWindowController: NSWindowController {
         split.addArrangedSubview(sidebarView)
 
         // Editor area (tab bar + editor)
+        // Note: Don't set translatesAutoresizingMaskIntoConstraints = false here
+        // because NSSplitView manages subview frames directly, not via Auto Layout
         let editorArea = NSView()
-        editorArea.translatesAutoresizingMaskIntoConstraints = false
+        editorArea.autoresizingMask = [.width, .height]
 
         // Tab bar
         let tabBar = TabBarView()
