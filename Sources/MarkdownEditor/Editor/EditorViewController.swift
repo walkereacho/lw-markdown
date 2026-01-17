@@ -22,8 +22,9 @@ final class EditorViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        // Create the main view
-        let containerView = NSView()
+        // Create the main view with an initial frame
+        // The frame will be resized by the window, but needs a non-zero starting size
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         containerView.autoresizingMask = [.width, .height]
         self.view = containerView
     }

@@ -5,8 +5,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowController: MainWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Required for programmatic AppKit apps to appear in Dock and show windows
+        NSApp.setActivationPolicy(.regular)
+
         setupMainMenu()
         openNewWindow()
+
+        // Bring app to front
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
