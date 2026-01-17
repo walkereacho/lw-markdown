@@ -62,8 +62,6 @@ final class DocumentModel {
         self.id = UUID()
         self.contentStorage = NSTextContentStorage()
         self.undoManager = UndoManager()
-
-        contentStorage.undoManager = undoManager
     }
 
     /// Load document from file.
@@ -77,7 +75,6 @@ final class DocumentModel {
 
         // Set text as plain attributed string — no formatting attributes
         contentStorage.attributedString = NSAttributedString(string: text)
-        contentStorage.undoManager = undoManager
 
         // Build paragraph cache
         paragraphCache.rebuildFull()
