@@ -17,24 +17,26 @@ final class MarkdownParser: TokenProviding {
         var tokens: [MarkdownToken] = []
 
         // Check block-level elements first (mutually exclusive)
+        // Horizontal rules have no content, so return immediately
+        if let hrToken = parseHorizontalRule(text) {
+            tokens.append(hrToken)
+            return tokens
+        }
+
+        // Other block-level elements may contain inline elements
         if let headingToken = parseHeading(text) {
             tokens.append(headingToken)
-            return tokens
+            // Continue to parse inline elements within the heading content
         }
 
         if let blockquoteToken = parseBlockquote(text) {
             tokens.append(blockquoteToken)
-            return tokens
+            // Continue to parse inline elements within the blockquote content
         }
 
         if let listToken = parseListItem(text) {
             tokens.append(listToken)
-            return tokens
-        }
-
-        if let hrToken = parseHorizontalRule(text) {
-            tokens.append(hrToken)
-            return tokens
+            // Continue to parse inline elements within the list item content
         }
 
         // Parse inline elements
@@ -143,6 +145,11 @@ final class MarkdownParser: TokenProviding {
         tokens.append(contentsOf: codeRanges.map { $0.token })
         excludedRanges.append(contentsOf: codeRanges.map { $0.fullRange })
 
+        // Links [text](url) - parse before emphasis so emphasis inside links works
+        let linkTokens = parseLinks(in: text, excluding: excludedRanges)
+        tokens.append(contentsOf: linkTokens)
+        excludedRanges.append(contentsOf: linkTokens.map { rangeFromToken($0) })
+
         // Bold italic first (***text***) - must be parsed before bold/italic
         let boldItalicTokens = parseEmphasis(
             in: text,
@@ -190,10 +197,6 @@ final class MarkdownParser: TokenProviding {
             excluding: excludedRanges
         )
         tokens.append(contentsOf: italicUnderscoreTokens)
-        excludedRanges.append(contentsOf: italicUnderscoreTokens.map { rangeFromToken($0) })
-
-        // Links [text](url)
-        tokens.append(contentsOf: parseLinks(in: text, excluding: excludedRanges))
 
         return tokens
     }
