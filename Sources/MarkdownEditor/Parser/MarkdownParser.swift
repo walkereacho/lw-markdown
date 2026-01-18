@@ -67,12 +67,38 @@ final class MarkdownParser: TokenProviding {
     }
 
     private func parseBlockquote(_ text: String) -> MarkdownToken? {
-        guard text.hasPrefix("> ") else { return nil }
+        // Match one or more '>' characters, each optionally followed by ' '
+        // Examples: "> text", "> > text", ">> text", "> > > text"
+        var depth = 0
+        var syntaxEnd = 0
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let char = text[index]
+            if char == ">" {
+                depth += 1
+                syntaxEnd = text.distance(from: text.startIndex, to: index) + 1
+                index = text.index(after: index)
+                // Skip optional space after each '>'
+                if index < text.endIndex && text[index] == " " {
+                    syntaxEnd = text.distance(from: text.startIndex, to: index) + 1
+                    index = text.index(after: index)
+                }
+            } else if char == " " {
+                // Allow space between '>' characters (like "> > text")
+                index = text.index(after: index)
+            } else {
+                break
+            }
+        }
+
+        guard depth > 0 else { return nil }
 
         return MarkdownToken(
             element: .blockquote,
-            contentRange: 2..<text.count,
-            syntaxRanges: [0..<2]
+            contentRange: syntaxEnd..<text.count,
+            syntaxRanges: [0..<syntaxEnd],
+            nestingDepth: depth
         )
     }
 

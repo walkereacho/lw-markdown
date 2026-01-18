@@ -137,13 +137,29 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
                 // Inactive: draw without syntax (content only)
                 drawInactiveHeading(text: text, level: level, token: token, at: point, in: context)
             }
-        } else {
-            // Non-heading: use existing logic
+            return
+        }
+
+        // Check if this is a blockquote
+        let blockquoteToken = tokens.first {
+            if case .blockquote = $0.element { return true }
+            return false
+        }
+
+        if let token = blockquoteToken {
             if isActiveParagraph {
-                drawRawMarkdown(text: text, at: point, in: context)
+                drawActiveBlockquote(text: text, token: token, at: point, in: context)
             } else {
-                drawFormattedMarkdown(text: text, at: point, in: context)
+                drawInactiveBlockquote(text: text, token: token, at: point, in: context)
             }
+            return
+        }
+
+        // Non-heading/non-blockquote: use existing logic
+        if isActiveParagraph {
+            drawRawMarkdown(text: text, at: point, in: context)
+        } else {
+            drawFormattedMarkdown(text: text, at: point, in: context)
         }
     }
 
@@ -163,6 +179,146 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         let contentText = String(text.dropFirst(token.contentRange.lowerBound))
         let attrString = NSAttributedString(string: contentText, attributes: theme.headingAttributes(level: level))
         drawAttributedString(attrString, at: point, in: context)
+    }
+
+    // MARK: - Blockquote Drawing
+
+    /// Draw active blockquote with syntax visible but muted.
+    /// Shows the '>' prefix characters in muted color.
+    private func drawActiveBlockquote(text: String, token: MarkdownToken, at point: CGPoint, in context: CGContext) {
+        // Draw the entire line with body styling
+        let attributedString = NSMutableAttributedString(
+            string: text,
+            attributes: theme.blockquoteAttributes
+        )
+
+        // Apply muted color to syntax characters (the ">" prefix)
+        for syntaxRange in token.syntaxRanges {
+            guard syntaxRange.upperBound <= text.count else { continue }
+            let nsRange = NSRange(location: syntaxRange.lowerBound, length: syntaxRange.count)
+            attributedString.addAttributes(theme.syntaxCharacterAttributes, range: nsRange)
+        }
+
+        drawAttributedString(attributedString, at: point, in: context)
+    }
+
+    /// Draw inactive blockquote with vertical bar indicator.
+    /// Hides the '>' syntax and draws a vertical bar on the left.
+    /// Handles inline formatting within the blockquote content.
+    private func drawInactiveBlockquote(text: String, token: MarkdownToken, at point: CGPoint, in context: CGContext) {
+        let depth = token.nestingDepth
+        let contentStart = token.contentRange.lowerBound
+
+        // Configuration for vertical bars
+        let barWidth: CGFloat = 3.0
+        let barSpacing: CGFloat = 12.0  // Space between bars for nested quotes
+        let contentIndent: CGFloat = 8.0  // Space between last bar and content
+        let totalIndent = CGFloat(depth) * barSpacing + contentIndent
+
+        // Get line height for proper bar height
+        let font = theme.blockquoteAttributes[.font] as? NSFont ?? theme.bodyFont
+        let lineHeight = font.ascender - font.descender + font.leading
+
+        // Draw vertical bars for each nesting level
+        context.saveGState()
+        context.setFillColor(theme.blockquoteColor.cgColor)
+
+        for level in 0..<depth {
+            let barX = point.x + CGFloat(level) * barSpacing
+            let barRect = CGRect(
+                x: barX,
+                y: point.y,
+                width: barWidth,
+                height: lineHeight
+            )
+            context.fill(barRect)
+        }
+        context.restoreGState()
+
+        // Get content text (without the ">" prefix)
+        let contentText = String(text.dropFirst(contentStart))
+
+        // Filter inline tokens that fall within the content range and adjust their ranges
+        let inlineTokens = tokens.filter { t in
+            if case .blockquote = t.element { return false }
+            return t.contentRange.lowerBound >= contentStart
+        }
+
+        // If no inline tokens, draw plain text with blockquote styling
+        if inlineTokens.isEmpty {
+            let attrString = NSAttributedString(string: contentText, attributes: theme.blockquoteAttributes)
+            let indentedPoint = CGPoint(x: point.x + totalIndent, y: point.y)
+            drawAttributedString(attrString, at: indentedPoint, in: context)
+            return
+        }
+
+        // Build drawing runs for content with inline formatting
+        var runs: [DrawingRun] = []
+        var currentX: CGFloat = 0
+        var processedEnd = contentStart  // Track position in original text
+
+        // Sort tokens by content start position
+        let sortedTokens = inlineTokens.sorted { $0.contentRange.lowerBound < $1.contentRange.lowerBound }
+
+        for inlineToken in sortedTokens {
+            // Find the earliest syntax range before content
+            let syntaxBefore = inlineToken.syntaxRanges.filter { $0.upperBound <= inlineToken.contentRange.lowerBound }
+            let syntaxStart = syntaxBefore.map(\.lowerBound).min() ?? inlineToken.contentRange.lowerBound
+
+            // Draw any plain text between last processed position and this token's syntax start
+            if processedEnd < syntaxStart {
+                let plainText = substring(of: text, from: processedEnd, to: syntaxStart)
+                if !plainText.isEmpty {
+                    runs.append(DrawingRun(
+                        text: plainText,
+                        attributes: theme.blockquoteAttributes,
+                        xOffset: currentX
+                    ))
+                    currentX += measureWidth(plainText, attributes: theme.blockquoteAttributes)
+                }
+            }
+
+            // Draw content with appropriate styling (merge with blockquote base style)
+            let tokenContentText = substring(of: text, from: inlineToken.contentRange.lowerBound, to: inlineToken.contentRange.upperBound)
+            if !tokenContentText.isEmpty {
+                var attrs = attributesForElement(inlineToken.element)
+                // Apply blockquote color to inline elements
+                if let _ = attrs[.foregroundColor] {
+                    attrs[.foregroundColor] = theme.blockquoteColor
+                }
+                runs.append(DrawingRun(
+                    text: tokenContentText,
+                    attributes: attrs,
+                    xOffset: currentX
+                ))
+                currentX += measureWidth(tokenContentText, attributes: attrs)
+            }
+
+            // Track where we've processed to (including trailing syntax)
+            let syntaxAfter = inlineToken.syntaxRanges.filter { $0.lowerBound >= inlineToken.contentRange.upperBound }
+            let endOfToken = syntaxAfter.map(\.upperBound).max() ?? inlineToken.contentRange.upperBound
+            processedEnd = max(processedEnd, endOfToken)
+        }
+
+        // Draw any remaining text after last token
+        if processedEnd < text.count {
+            let remainingText = substring(of: text, from: processedEnd, to: text.count)
+            if !remainingText.isEmpty {
+                runs.append(DrawingRun(
+                    text: remainingText,
+                    attributes: theme.blockquoteAttributes,
+                    xOffset: currentX
+                ))
+            }
+        }
+
+        // Execute drawing at indented position
+        let indentedPoint = CGPoint(x: point.x + totalIndent, y: point.y)
+        for run in runs {
+            let runPoint = CGPoint(x: indentedPoint.x + run.xOffset, y: indentedPoint.y)
+            let attrString = NSAttributedString(string: run.text, attributes: run.attributes)
+            drawAttributedString(attrString, at: runPoint, in: context)
+        }
     }
 
     // MARK: - Horizontal Rule Drawing
