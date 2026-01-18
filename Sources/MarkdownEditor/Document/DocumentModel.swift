@@ -26,6 +26,11 @@ enum DocumentError: LocalizedError {
 /// - Clean undo (only content changes recorded)
 /// - Multiple panes with different "active paragraph" states
 /// - Safe external file reload
+///
+/// ## Initialization Order
+/// When loading from file, content is NOT applied until `applyPendingContent()`
+/// is called. This ensures the layout manager is connected first, which is
+/// required for proper TextKit 2 text element enumeration and editing.
 final class DocumentModel {
 
     /// Unique identifier for this document.
@@ -55,6 +60,9 @@ final class DocumentModel {
     /// Last save timestamp.
     var lastSavedAt: Date?
 
+    /// Content loaded from file, waiting to be applied after layout is ready.
+    private var pendingContent: String?
+
     // MARK: - Initialization
 
     /// Create a new empty document.
@@ -65,19 +73,34 @@ final class DocumentModel {
     }
 
     /// Load document from file.
+    /// Note: Content is stored but not applied until `applyPendingContent()` is called.
+    /// This ensures proper TextKit 2 initialization order.
     init(contentsOf url: URL) throws {
         self.id = UUID()
         self.filePath = url
         self.contentStorage = NSTextContentStorage()
         self.undoManager = UndoManager()
 
-        let text = try String(contentsOf: url, encoding: .utf8)
+        // Read file content but defer applying until layout is ready
+        self.pendingContent = try String(contentsOf: url, encoding: .utf8)
+    }
 
-        // Set text as plain attributed string — no formatting attributes
+    /// Apply pending content after layout manager is connected.
+    /// Must be called after `contentStorage.addTextLayoutManager()`.
+    func applyPendingContent() {
+        guard let text = pendingContent else { return }
+        pendingContent = nil
+
+        // Now safe to set content - layout manager is connected
         contentStorage.attributedString = NSAttributedString(string: text)
 
-        // Build paragraph cache
+        // Build paragraph cache now that text elements can be enumerated
         paragraphCache.rebuildFull()
+    }
+
+    /// Whether there is pending content waiting to be applied.
+    var hasPendingContent: Bool {
+        pendingContent != nil
     }
 
     // MARK: - Text Access
@@ -85,6 +108,10 @@ final class DocumentModel {
     /// Full document as plain string.
     /// Use sparingly — prefer paragraph access for performance.
     func fullString() -> String {
+        // If content is pending (not yet applied), return that
+        if let pending = pendingContent {
+            return pending
+        }
         guard let attrString = contentStorage.attributedString else { return "" }
         return attrString.string
     }

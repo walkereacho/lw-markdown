@@ -22,33 +22,44 @@ final class ParagraphIndexCache {
 
     // MARK: - Lookup (O(log N) via binary search)
 
-    /// Find paragraph index for a text location.
+    /// Find paragraph index for a text location using raw text analysis.
+    /// Paragraph N = text after the Nth newline (paragraph 0 = text before first newline)
     func paragraphIndex(for location: NSTextLocation) -> Int? {
-        guard let storage = contentStorage else { return nil }
+        guard let storage = contentStorage,
+              let textStorage = storage.textStorage else {
+            return nil
+        }
 
-        // Binary search
-        var low = 0
-        var high = paragraphRanges.count - 1
+        let text = textStorage.string
+        let cursorOffset = storage.offset(from: storage.documentRange.location, to: location)
 
-        while low <= high {
-            let mid = (low + high) / 2
-            let entry = paragraphRanges[mid]
+        // Empty document = paragraph 0
+        if text.isEmpty {
+            return 0
+        }
 
-            if entry.range.contains(location) {
-                return entry.index
+        // Cursor beyond text = on empty new line, no active paragraph
+        if cursorOffset >= text.count {
+            // Check if last char is newline - if so, we're on empty line after it
+            if text.last == "\n" {
+                return nil
             }
+            // Otherwise cursor is at end of last line (no trailing newline)
+            return text.filter { $0 == "\n" }.count
+        }
 
-            let targetOffset = storage.offset(from: storage.documentRange.location, to: location)
-            let entryOffset = storage.offset(from: storage.documentRange.location, to: entry.range.location)
-
-            if targetOffset < entryOffset {
-                high = mid - 1
-            } else {
-                low = mid + 1
+        // Check if char before cursor is newline (we're at start of a line)
+        if cursorOffset > 0 {
+            let idx = text.index(text.startIndex, offsetBy: cursorOffset - 1)
+            if text[idx] == "\n" {
+                // We're at position 0 of a new line
+                // Paragraph index = number of newlines before cursor
+                return text.prefix(cursorOffset).filter { $0 == "\n" }.count
             }
         }
 
-        return nil
+        // Normal case: count newlines before cursor position
+        return text.prefix(cursorOffset).filter { $0 == "\n" }.count
     }
 
     /// Get text range for a paragraph index.
