@@ -6,7 +6,7 @@ Build out all rendering drivers for the MarkdownEditor hybrid WYSIWYG system. Ea
 
 ## Agent Architecture
 
-6 parallel agents, each working in its own git worktree on a dedicated feature branch:
+6 sequential agents, each working in the main repo on a dedicated feature branch (one at a time):
 
 | Agent | Branch | Obsidian Ref | Fixture |
 |-------|--------|--------------|---------|
@@ -78,41 +78,52 @@ Review sub-agents score on structural criteria (10 points total):
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Main Orchestrator                            │
 ├─────────────────────────────────────────────────────────────────┤
-│  1. Create 6 git worktrees (parallel)                           │
-│     └── ../Markdown-blockquotes     → feature/blockquotes-driver│
-│     └── ../Markdown-code-blocks     → feature/code-blocks-driver│
-│     └── ../Markdown-horizontal-rules→ feature/horizontal-rules  │
-│     └── ../Markdown-inline-fmt      → feature/inline-formatting │
-│     └── ../Markdown-lists-unordered → feature/lists-unordered   │
-│     └── ../Markdown-lists-ordered   → feature/lists-ordered     │
+│  For each driver in sequence:                                    │
 │                                                                  │
-│  2. Launch 6 agents in parallel (one per worktree)              │
-│     └── Each agent runs independently                           │
-│     └── Each agent uses Ralph Loop (max 5 iterations)           │
+│  1. Create feature branch from main                             │
+│     └── git checkout -b feature/{driver}-driver                 │
 │                                                                  │
-│  3. Wait for all agents to complete                             │
-│     └── Collect final scores and status                         │
+│  2. Launch agent for this driver                                │
+│     └── Agent implements driver in main repo                    │
+│     └── Agent uses Ralph Loop (max 5 iterations)                │
+│     └── Agent commits when score >= 8 or iterations = 5         │
 │                                                                  │
-│  4. Run Lists-Mixed validation                                  │
-│     └── Merge lists-unordered + lists-ordered into temp branch  │
+│  3. Wait for agent to complete                                  │
+│     └── Record final score and status                           │
+│     └── Merge branch to main if score >= 8                      │
+│                                                                  │
+│  4. Return to main branch for next driver                       │
+│     └── git checkout main                                       │
+│                                                                  │
+│  After all 6 drivers complete:                                   │
+│                                                                  │
+│  5. Run Lists-Mixed validation                                  │
 │     └── Screenshot test with lists-mixed.md                     │
 │     └── Review sub-agent scores the integration                 │
 │                                                                  │
-│  5. Report results                                              │
+│  6. Report results                                              │
 │     └── Per-driver: final score, iterations used, status        │
 │     └── Lists-Mixed integration score                           │
-│     └── Branches ready for merge (if all pass)                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Execution Order
+
+1. **Horizontal Rules** - Simplest, single-line element
+2. **Inline Formatting** - Enhances existing drawFormattedMarkdown()
+3. **Blockquotes** - Block-level with visual indicator
+4. **Code Blocks** - Block-level with background
+5. **Lists Unordered** - Line-level with bullet transformation
+6. **Lists Ordered** - Line-level with number alignment
 
 ## Agent Prompt Template
 
 ```
 You are implementing the {DRIVER_NAME} rendering driver for MarkdownEditor.
 
-## Your Worktree
+## Your Branch
 - Branch: feature/{driver-name}-driver
-- Location: ../Markdown-{driver-name}
+- Location: /Users/walkereacho/Desktop/code/Markdown (main repo)
 
 ## Reference Materials
 1. Obsidian screenshot: docs/references/obsidian/{feature}.png
