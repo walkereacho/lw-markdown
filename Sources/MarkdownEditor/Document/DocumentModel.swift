@@ -43,6 +43,10 @@ final class DocumentModel {
     /// Contains raw Markdown — NEVER rendering attributes.
     let contentStorage: NSTextContentStorage
 
+    /// Backing text storage for NSTextView editing compatibility.
+    /// NSTextContentStorage needs this for NSTextView to properly edit content.
+    let textStorage: NSTextStorage
+
     /// Undo manager for content changes.
     let undoManager: UndoManager
 
@@ -68,7 +72,9 @@ final class DocumentModel {
     /// Create a new empty document.
     init() {
         self.id = UUID()
+        self.textStorage = NSTextStorage()
         self.contentStorage = NSTextContentStorage()
+        self.contentStorage.textStorage = textStorage
         self.undoManager = UndoManager()
     }
 
@@ -76,13 +82,16 @@ final class DocumentModel {
     /// Note: Content is stored but not applied until `applyPendingContent()` is called.
     /// This ensures proper TextKit 2 initialization order.
     init(contentsOf url: URL) throws {
+        // Read file content first (can throw)
+        let content = try String(contentsOf: url, encoding: .utf8)
+
         self.id = UUID()
         self.filePath = url
+        self.textStorage = NSTextStorage()
         self.contentStorage = NSTextContentStorage()
+        self.contentStorage.textStorage = textStorage
         self.undoManager = UndoManager()
-
-        // Read file content but defer applying until layout is ready
-        self.pendingContent = try String(contentsOf: url, encoding: .utf8)
+        self.pendingContent = content
     }
 
     /// Apply pending content after layout manager is connected.
@@ -91,8 +100,8 @@ final class DocumentModel {
         guard let text = pendingContent else { return }
         pendingContent = nil
 
-        // Now safe to set content - layout manager is connected
-        contentStorage.attributedString = NSAttributedString(string: text)
+        // Set content via textStorage so NSTextView can access it
+        textStorage.setAttributedString(NSAttributedString(string: text))
 
         // Build paragraph cache now that text elements can be enumerated
         paragraphCache.rebuildFull()

@@ -26,11 +26,9 @@ final class ParagraphIndexCache {
     /// Paragraph N = text after the Nth newline (paragraph 0 = text before first newline)
     func paragraphIndex(for location: NSTextLocation) -> Int? {
         guard let storage = contentStorage,
-              let textStorage = storage.textStorage else {
+              let text = storage.attributedString?.string else {
             return nil
         }
-
-        let text = textStorage.string
         let cursorOffset = storage.offset(from: storage.documentRange.location, to: location)
 
         // Empty document = paragraph 0

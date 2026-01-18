@@ -82,6 +82,25 @@ final class PaneController: NSObject {
 
         // Apply pending content now that layout infrastructure is ready
         document.applyPendingContent()
+
+        // Initialize rendering state after content is loaded
+        initializeAfterContentLoad()
+    }
+
+    /// Initialize rendering state after content is loaded.
+    /// Sets up heading fonts and active paragraph for correct initial display.
+    private func initializeAfterContentLoad() {
+        // Apply heading fonts so TextKit 2 calculates correct metrics
+        applyHeadingFontsToStorage()
+
+        // Set initial active paragraph to 0 (cursor starts at beginning)
+        activeParagraphIndex = 0
+
+        // Force layout fragment recreation
+        if let textContainer = layoutManager.textContainer {
+            layoutManager.textContainer = nil
+            layoutManager.textContainer = textContainer
+        }
     }
 
     deinit {

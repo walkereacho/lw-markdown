@@ -63,6 +63,12 @@ final class EditorViewController: NSViewController {
         // Set as scroll view's document view
         scrollView.documentView = paneController?.textView
 
+        // Invalidate layout and force full redraw to clear any rendering artifacts
+        if let pane = paneController {
+            pane.layoutManager.ensureLayout(for: pane.layoutManager.documentRange)
+            pane.textView.display()
+        }
+
         // Make text view first responder
         view.window?.makeFirstResponder(paneController?.textView)
     }
