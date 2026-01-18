@@ -93,6 +93,9 @@ final class PaneController: NSObject {
         // Apply heading fonts so TextKit 2 calculates correct metrics
         applyHeadingFontsToStorage()
 
+        // Update block context for fenced code blocks
+        updateBlockContext()
+
         // Set initial active paragraph to 0 (cursor starts at beginning)
         activeParagraphIndex = 0
 
@@ -101,6 +104,13 @@ final class PaneController: NSObject {
             layoutManager.textContainer = nil
             layoutManager.textContainer = textContainer
         }
+    }
+
+    /// Update block context by scanning all paragraphs for multi-line constructs.
+    private func updateBlockContext() {
+        guard let text = textView.textStorage?.string else { return }
+        let paragraphs = text.components(separatedBy: "\n")
+        layoutDelegate.updateBlockContext(paragraphs: paragraphs)
     }
 
     deinit {
@@ -246,5 +256,8 @@ extension PaneController: NSTextViewDelegate {
 
         // Apply heading fonts for correct cursor metrics
         applyHeadingFontsToStorage()
+
+        // Update block context for fenced code blocks
+        updateBlockContext()
     }
 }

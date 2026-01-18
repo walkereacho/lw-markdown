@@ -13,6 +13,14 @@ import CoreText
 /// - isActiveParagraph is PANE-LOCAL (different panes can have different active paragraphs)
 final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
+    /// Information about code block context for this paragraph.
+    enum CodeBlockInfo {
+        /// This paragraph is the opening or closing fence line.
+        case fence(language: String?)
+        /// This paragraph is inside a fenced code block (between fences).
+        case content(language: String?)
+    }
+
     /// Parsed Markdown tokens for this paragraph.
     let tokens: [MarkdownToken]
 
@@ -24,6 +32,9 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
     /// Theme for visual styling.
     let theme: SyntaxTheme
+
+    /// Code block information (nil if not part of a fenced code block).
+    let codeBlockInfo: CodeBlockInfo?
 
     /// Check if this paragraph is currently active (at draw time, not creation time).
     private var isActiveParagraph: Bool {
@@ -38,12 +49,14 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         tokens: [MarkdownToken],
         paragraphIndex: Int,
         paneController: PaneController?,
-        theme: SyntaxTheme
+        theme: SyntaxTheme,
+        codeBlockInfo: CodeBlockInfo? = nil
     ) {
         self.tokens = tokens
         self.paragraphIndex = paragraphIndex
         self.paneController = paneController
         self.theme = theme
+        self.codeBlockInfo = codeBlockInfo
         super.init(textElement: textElement, range: range)
     }
 
@@ -53,7 +66,7 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
     // MARK: - Layout Bounds
 
-    /// Override to provide bounds that accommodate larger fonts (headings) and full-width horizontal rules.
+    /// Override to provide bounds that accommodate larger fonts (headings), full-width horizontal rules, and code block backgrounds.
     override var renderingSurfaceBounds: CGRect {
         let baseBounds = super.renderingSurfaceBounds
 
@@ -74,7 +87,12 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             }
         }
 
-        // Get the content width for horizontal rules
+        // Code blocks need full width for background
+        if codeBlockInfo != nil {
+            needsFullWidth = true
+        }
+
+        // Get the content width for horizontal rules and code blocks
         var width = baseBounds.width
         if needsFullWidth {
             if let layoutManager = textLayoutManager,
@@ -107,6 +125,22 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
 
         let text = paragraph.attributedString.string
+
+        // Check if this is part of a fenced code block
+        if let codeInfo = codeBlockInfo {
+            switch codeInfo {
+            case .fence(let language):
+                if isActiveParagraph {
+                    drawActiveFenceLine(text: text, language: language, at: point, in: context)
+                } else {
+                    drawInactiveFenceLine(text: text, language: language, at: point, in: context)
+                }
+                return
+            case .content(let language):
+                drawCodeBlockContent(text: text, language: language, at: point, in: context)
+                return
+            }
+        }
 
         // Check if this is a horizontal rule
         let hrToken = tokens.first {
@@ -352,6 +386,74 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         context.move(to: CGPoint(x: lineStartX, y: verticalCenter))
         context.addLine(to: CGPoint(x: lineEndX, y: verticalCenter))
         context.strokePath()
+        context.restoreGState()
+    }
+
+    // MARK: - Code Block Drawing
+
+    /// Draw fence line when active (cursor present).
+    /// Shows ``` or ~~~ with language hint in muted color.
+    private func drawActiveFenceLine(text: String, language: String?, at point: CGPoint, in context: CGContext) {
+        // Draw background first
+        drawCodeBlockBackground(at: point, in: context)
+
+        // Draw the fence syntax in muted color with monospace font
+        let attrString = NSAttributedString(string: text, attributes: theme.syntaxCharacterAttributes)
+        drawAttributedString(attrString, at: point, in: context)
+    }
+
+    /// Draw fence line when inactive (cursor not present).
+    /// Hides the fence syntax entirely - shows nothing or just the language label.
+    private func drawInactiveFenceLine(text: String, language: String?, at point: CGPoint, in context: CGContext) {
+        // Draw background
+        drawCodeBlockBackground(at: point, in: context)
+
+        // For inactive fence lines, we hide the ``` syntax entirely
+        // Optionally show language label if this is opening fence
+        if let lang = language, !lang.isEmpty {
+            // Show language label in small muted text at top-right (like Obsidian)
+            var labelAttrs = theme.syntaxCharacterAttributes
+            labelAttrs[.font] = NSFont.systemFont(ofSize: 10, weight: .medium)
+            let labelString = NSAttributedString(string: lang, attributes: labelAttrs)
+
+            // Position label at the right side
+            let labelWidth = measureWidth(lang, attributes: labelAttrs)
+            let bounds = renderingSurfaceBounds
+            let labelPoint = CGPoint(x: point.x + bounds.width - labelWidth - 8, y: point.y)
+            drawAttributedString(labelString, at: labelPoint, in: context)
+        }
+        // If no language or closing fence, draw nothing (just background)
+    }
+
+    /// Draw code block content (lines between fences).
+    /// Uses monospace font with background, regardless of active state.
+    private func drawCodeBlockContent(text: String, language: String?, at point: CGPoint, in context: CGContext) {
+        // Draw background first
+        drawCodeBlockBackground(at: point, in: context)
+
+        // Draw content with monospace font
+        let attrString = NSAttributedString(string: text, attributes: theme.codeBlockAttributes)
+        drawAttributedString(attrString, at: point, in: context)
+    }
+
+    /// Draw the code block background rectangle.
+    private func drawCodeBlockBackground(at point: CGPoint, in context: CGContext) {
+        let bounds = renderingSurfaceBounds
+
+        // Get line height for proper background height
+        let font = theme.codeFont
+        let lineHeight = font.ascender - font.descender + font.leading
+
+        context.saveGState()
+        context.setFillColor(theme.codeBackgroundColor.cgColor)
+
+        let bgRect = CGRect(
+            x: point.x,
+            y: point.y,
+            width: bounds.width,
+            height: max(lineHeight, bounds.height)
+        )
+        context.fill(bgRect)
         context.restoreGState()
     }
 
