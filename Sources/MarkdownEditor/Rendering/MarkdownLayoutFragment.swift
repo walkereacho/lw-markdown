@@ -15,8 +15,12 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
     /// Information about code block context for this paragraph.
     enum CodeBlockInfo {
-        /// This paragraph is the opening or closing fence line.
-        case fence(language: String?)
+        /// This paragraph is the opening fence line (```swift, etc.).
+        /// Background should extend to connect with content below.
+        case openingFence(language: String?)
+        /// This paragraph is the closing fence line (```).
+        /// Background should NOT extend beyond text to avoid styling next paragraph.
+        case closingFence
         /// This paragraph is inside a fenced code block (between fences).
         case content(language: String?)
     }
@@ -129,11 +133,18 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         // Check if this is part of a fenced code block
         if let codeInfo = codeBlockInfo {
             switch codeInfo {
-            case .fence(let language):
+            case .openingFence(let language):
                 if isActiveParagraph {
-                    drawActiveFenceLine(text: text, language: language, at: point, in: context)
+                    drawActiveFenceLine(text: text, language: language, isOpening: true, at: point, in: context)
                 } else {
-                    drawInactiveFenceLine(text: text, language: language, at: point, in: context)
+                    drawInactiveFenceLine(text: text, language: language, isOpening: true, at: point, in: context)
+                }
+                return
+            case .closingFence:
+                if isActiveParagraph {
+                    drawActiveFenceLine(text: text, language: nil, isOpening: false, at: point, in: context)
+                } else {
+                    drawInactiveFenceLine(text: text, language: nil, isOpening: false, at: point, in: context)
                 }
                 return
             case .content(let language):
@@ -683,9 +694,10 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
     /// Draw fence line when active (cursor present).
     /// Shows ``` or ~~~ with language hint in muted color.
-    private func drawActiveFenceLine(text: String, language: String?, at point: CGPoint, in context: CGContext) {
-        // Draw background first
-        drawCodeBlockBackground(at: point, in: context)
+    /// - Parameter isOpening: True for opening fence (extends to content), false for closing fence.
+    private func drawActiveFenceLine(text: String, language: String?, isOpening: Bool, at point: CGPoint, in context: CGContext) {
+        // Opening fence extends to connect with content; closing fence does not extend
+        drawCodeBlockBackground(at: point, in: context, useFullHeight: isOpening)
 
         // Draw the fence syntax in muted color with monospace font
         let attrString = NSAttributedString(string: text, attributes: theme.syntaxCharacterAttributes)
@@ -694,9 +706,10 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
     /// Draw fence line when inactive (cursor not present).
     /// Hides the fence syntax entirely - shows nothing or just the language label.
-    private func drawInactiveFenceLine(text: String, language: String?, at point: CGPoint, in context: CGContext) {
-        // Draw background
-        drawCodeBlockBackground(at: point, in: context)
+    /// - Parameter isOpening: True for opening fence (extends to content), false for closing fence.
+    private func drawInactiveFenceLine(text: String, language: String?, isOpening: Bool, at point: CGPoint, in context: CGContext) {
+        // Opening fence extends to connect with content; closing fence does not extend
+        drawCodeBlockBackground(at: point, in: context, useFullHeight: isOpening)
 
         // For inactive fence lines, we hide the ``` syntax entirely
         // Optionally show language label if this is opening fence
@@ -716,23 +729,47 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     }
 
     /// Draw code block content (lines between fences).
-    /// Uses monospace font with background, regardless of active state.
+    /// Active: plain monospace text. Inactive: syntax-highlighted text.
     private func drawCodeBlockContent(text: String, language: String?, at point: CGPoint, in context: CGContext) {
-        // Draw background first
-        drawCodeBlockBackground(at: point, in: context)
+        // Content lines use full fragment height for continuous backgrounds
+        drawCodeBlockBackground(at: point, in: context, useFullHeight: true)
 
-        // Draw content with monospace font
-        let attrString = NSAttributedString(string: text, attributes: theme.codeBlockAttributes)
-        drawAttributedString(attrString, at: point, in: context)
+        // Active paragraph: show plain monospace (raw code)
+        if isActiveParagraph {
+            let attrString = NSAttributedString(string: text, attributes: theme.codeBlockAttributes)
+            drawAttributedString(attrString, at: point, in: context)
+            return
+        }
+
+        // Inactive paragraph: apply syntax highlighting
+        if let highlighted = SyntaxHighlighter.shared.highlight(code: text, language: language) {
+            drawAttributedString(highlighted, at: point, in: context)
+        } else {
+            // Fallback to plain monospace if highlighting fails
+            let attrString = NSAttributedString(string: text, attributes: theme.codeBlockAttributes)
+            drawAttributedString(attrString, at: point, in: context)
+        }
     }
 
     /// Draw the code block background rectangle.
-    private func drawCodeBlockBackground(at point: CGPoint, in context: CGContext) {
+    /// - Parameters:
+    ///   - useFullHeight: If true, uses full fragment height (for opening fences and content lines).
+    ///                    If false, uses text content height only (for closing fences).
+    private func drawCodeBlockBackground(at point: CGPoint, in context: CGContext, useFullHeight: Bool) {
         let bounds = renderingSurfaceBounds
 
-        // Get line height for proper background height
-        let font = theme.codeFont
-        let lineHeight = font.ascender - font.descender + font.leading
+        // Determine background height:
+        // - Opening fence + content: Use full fragment height for continuous backgrounds
+        //   (layoutFragmentFrame includes inter-line spacing to connect with next line).
+        // - Closing fence: Use text content height only to prevent background from
+        //   extending into trailing newline space (which would incorrectly style the next paragraph).
+        let bgHeight: CGFloat
+        if useFullHeight {
+            bgHeight = layoutFragmentFrame.height
+        } else {
+            let font = theme.codeFont
+            bgHeight = font.ascender - font.descender + font.leading
+        }
 
         context.saveGState()
         context.setFillColor(theme.codeBackgroundColor.cgColor)
@@ -741,7 +778,7 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             x: point.x,
             y: point.y,
             width: bounds.width,
-            height: max(lineHeight, bounds.height)
+            height: bgHeight
         )
         context.fill(bgRect)
         context.restoreGState()

@@ -17,6 +17,21 @@ struct SyntaxTheme {
     let syntaxCharacterColor: NSColor
     let blockquoteColor: NSColor
 
+    /// Highlight.js theme name for light mode (used for syntax highlighting in code blocks).
+    let highlightThemeLight: String
+
+    /// Highlight.js theme name for dark mode (used for syntax highlighting in code blocks).
+    let highlightThemeDark: String
+
+    // MARK: - Highlight.js Theme Selection
+
+    /// Returns the appropriate highlight.js theme name for the current system appearance.
+    var highlightTheme: String {
+        let appearance = NSApp.effectiveAppearance
+        let isDarkMode = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDarkMode ? highlightThemeDark : highlightThemeLight
+    }
+
     // MARK: - Attribute Dictionaries
 
     var bodyAttributes: [NSAttributedString.Key: Any] {
@@ -105,7 +120,9 @@ struct SyntaxTheme {
             linkColor: .linkColor,
             codeBackgroundColor: .quaternaryLabelColor,
             syntaxCharacterColor: .tertiaryLabelColor,
-            blockquoteColor: .secondaryLabelColor
+            blockquoteColor: .secondaryLabelColor,
+            highlightThemeLight: "github",
+            highlightThemeDark: "atom-one-dark"
         )
     }()
 }
