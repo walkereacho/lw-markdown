@@ -30,4 +30,24 @@ struct BlockContext {
         }
         return false
     }
+
+    /// Check if a paragraph is the opening fence of a code block.
+    func isOpeningFence(paragraphIndex: Int) -> (Bool, String?) {
+        for block in fencedCodeBlocks {
+            if paragraphIndex == block.start {
+                return (true, block.language)
+            }
+        }
+        return (false, nil)
+    }
+
+    /// Check if a paragraph is the closing fence of a code block.
+    func isClosingFence(paragraphIndex: Int) -> Bool {
+        for block in fencedCodeBlocks {
+            if paragraphIndex == block.end {
+                return true
+            }
+        }
+        return false
+    }
 }

@@ -59,16 +59,17 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
 
         // Check if this paragraph is part of a fenced code block
         let (isInsideCodeBlock, language) = blockContext.isInsideFencedCodeBlock(paragraphIndex: paragraphIndex)
-        let isFenceLine = blockContext.isFenceBoundary(paragraphIndex: paragraphIndex)
+        let (isOpening, openingLanguage) = blockContext.isOpeningFence(paragraphIndex: paragraphIndex)
+        let isClosing = blockContext.isClosingFence(paragraphIndex: paragraphIndex)
 
         // Determine code block info for this paragraph
         var codeBlockInfo: MarkdownLayoutFragment.CodeBlockInfo? = nil
         if isInsideCodeBlock {
             codeBlockInfo = .content(language: language)
-        } else if isFenceLine {
-            // Extract language from opening fence if this is one
-            let fenceLanguage = extractFenceLanguage(from: text)
-            codeBlockInfo = .fence(language: fenceLanguage)
+        } else if isOpening {
+            codeBlockInfo = .openingFence(language: openingLanguage)
+        } else if isClosing {
+            codeBlockInfo = .closingFence
         }
 
         let tokens = tokenProvider.parse(text)
@@ -83,15 +84,5 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
             theme: theme,
             codeBlockInfo: codeBlockInfo
         )
-    }
-
-    // MARK: - Private Helpers
-
-    /// Extract language hint from a fence line (e.g., "```swift" -> "swift").
-    private func extractFenceLanguage(from text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") else { return nil }
-        let afterFence = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-        return afterFence.isEmpty ? nil : afterFence
     }
 }
