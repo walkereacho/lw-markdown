@@ -53,12 +53,13 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
     // MARK: - Layout Bounds
 
-    /// Override to provide bounds that accommodate larger fonts (headings).
+    /// Override to provide bounds that accommodate larger fonts (headings) and full-width horizontal rules.
     override var renderingSurfaceBounds: CGRect {
         let baseBounds = super.renderingSurfaceBounds
 
         // Find the maximum line height needed based on tokens
         var maxHeight: CGFloat = baseBounds.height
+        var needsFullWidth = false
 
         for token in tokens {
             if case .heading(let level) = token.element {
@@ -66,14 +67,30 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
                 let lineHeight = font.ascender - font.descender + font.leading
                 maxHeight = max(maxHeight, lineHeight + 8)  // Add padding
             }
+            if case .horizontalRule = token.element {
+                needsFullWidth = true
+                // Ensure minimum height for horizontal rule
+                maxHeight = max(maxHeight, theme.bodyFont.pointSize + 8)
+            }
+        }
+
+        // Get the content width for horizontal rules
+        var width = baseBounds.width
+        if needsFullWidth {
+            if let layoutManager = textLayoutManager,
+               let textContainer = layoutManager.textContainer {
+                width = textContainer.size.width - 40  // Account for insets
+            } else {
+                width = max(width, 800)  // Fallback
+            }
         }
 
         // Return expanded bounds if needed
-        if maxHeight > baseBounds.height {
+        if maxHeight > baseBounds.height || width > baseBounds.width {
             return CGRect(
                 x: baseBounds.origin.x,
                 y: baseBounds.origin.y,
-                width: baseBounds.width,
+                width: width,
                 height: maxHeight
             )
         }
@@ -90,6 +107,21 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
 
         let text = paragraph.attributedString.string
+
+        // Check if this is a horizontal rule
+        let hrToken = tokens.first {
+            if case .horizontalRule = $0.element { return true }
+            return false
+        }
+
+        if let token = hrToken {
+            if isActiveParagraph {
+                drawActiveHorizontalRule(text: text, token: token, at: point, in: context)
+            } else {
+                drawInactiveHorizontalRule(at: point, in: context)
+            }
+            return
+        }
 
         // Check if this is a heading
         let headingToken = tokens.first {
@@ -131,6 +163,40 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         let contentText = String(text.dropFirst(token.contentRange.lowerBound))
         let attrString = NSAttributedString(string: contentText, attributes: theme.headingAttributes(level: level))
         drawAttributedString(attrString, at: point, in: context)
+    }
+
+    // MARK: - Horizontal Rule Drawing
+
+    /// Draw active horizontal rule with syntax visible but muted.
+    /// Shows the ---, ***, ___, or spaced variants in muted color.
+    private func drawActiveHorizontalRule(text: String, token: MarkdownToken, at point: CGPoint, in context: CGContext) {
+        // Show syntax characters in muted color
+        let attrString = NSAttributedString(string: text, attributes: theme.syntaxCharacterAttributes)
+        drawAttributedString(attrString, at: point, in: context)
+    }
+
+    /// Draw inactive horizontal rule as a visual line.
+    /// Draws a thin horizontal line spanning most of the content width.
+    private func drawInactiveHorizontalRule(at point: CGPoint, in context: CGContext) {
+        let bounds = renderingSurfaceBounds
+
+        // Line configuration
+        let lineThickness: CGFloat = 1.0
+        let verticalCenter = point.y + bounds.height / 2
+
+        // Draw the horizontal line using the full width from renderingSurfaceBounds
+        context.saveGState()
+        context.setStrokeColor(theme.syntaxCharacterColor.cgColor)
+        context.setLineWidth(lineThickness)
+
+        // Line spans the full content width (bounds already expanded in renderingSurfaceBounds)
+        let lineStartX = point.x
+        let lineEndX = point.x + bounds.width
+
+        context.move(to: CGPoint(x: lineStartX, y: verticalCenter))
+        context.addLine(to: CGPoint(x: lineEndX, y: verticalCenter))
+        context.strokePath()
+        context.restoreGState()
     }
 
     // MARK: - Raw Markdown Drawing (Active Paragraph)
