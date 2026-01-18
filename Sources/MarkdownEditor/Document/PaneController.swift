@@ -53,7 +53,9 @@ final class PaneController: NSObject {
 
         // Create layout infrastructure
         self.layoutManager = NSTextLayoutManager()
-        self.textContainer = NSTextContainer(size: frame.size)
+        // Text container needs unlimited height for scrolling to work
+        let containerSize = NSSize(width: frame.width, height: CGFloat.greatestFiniteMagnitude)
+        self.textContainer = NSTextContainer(size: containerSize)
         self.layoutDelegate = MarkdownLayoutManagerDelegate()
 
         // Configure
@@ -121,6 +123,9 @@ final class PaneController: NSObject {
         textView.autoresizingMask = [.width]
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
+        // Allow text view to grow to fit content
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.minSize = NSSize(width: 0, height: 0)
         textView.textContainerInset = NSSize(width: 20, height: 20)
 
         // Explicitly enable editing and selection
