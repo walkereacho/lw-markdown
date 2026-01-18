@@ -122,17 +122,22 @@ final class MarkdownParser: TokenProviding {
             )
         }
 
-        // Ordered: 1. item, 2. item, etc.
-        let orderedPattern = #/^(\d+)\.\s+(.+)$/#
+        // Ordered: 1. item, 2. item, etc. (with optional leading indentation)
+        let orderedPattern = #/^(\s*)(\d+)\.\s+(.+)$/#
 
         if let match = text.wholeMatch(of: orderedPattern) {
-            let numberStr = String(match.1)
+            let leadingSpaces = String(match.1)
+            let indentLength = leadingSpaces.count
+            // Calculate nesting depth: 3 spaces = 1 level of nesting (common for ordered lists)
+            let nestingDepth = (indentLength / 3) + 1  // +1 because top-level is depth 1
+            let numberStr = String(match.2)
             let number = Int(numberStr) ?? 1
-            let syntaxLength = numberStr.count + 2  // number + ". "
+            let syntaxEnd = indentLength + numberStr.count + 2  // indent + number + ". "
             return MarkdownToken(
                 element: .orderedListItem(number: number),
-                contentRange: syntaxLength..<text.count,
-                syntaxRanges: [0..<syntaxLength]
+                contentRange: syntaxEnd..<text.count,
+                syntaxRanges: [indentLength..<syntaxEnd],  // Only number + ". " is syntax
+                nestingDepth: nestingDepth
             )
         }
 

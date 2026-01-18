@@ -204,6 +204,21 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             return
         }
 
+        // Check if this is an ordered list item
+        let orderedListToken = tokens.first {
+            if case .orderedListItem = $0.element { return true }
+            return false
+        }
+
+        if let token = orderedListToken, case .orderedListItem(let number) = token.element {
+            if isActiveParagraph {
+                drawActiveOrderedListItem(text: text, token: token, number: number, at: point, in: context)
+            } else {
+                drawInactiveOrderedListItem(text: text, token: token, number: number, at: point, in: context)
+            }
+            return
+        }
+
         // Non-heading/non-blockquote/non-list: use existing logic
         if isActiveParagraph {
             drawRawMarkdown(text: text, at: point, in: context)
@@ -425,6 +440,139 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
         // Calculate content position (after bullet)
         let contentPoint = CGPoint(x: point.x + totalIndent + bulletWidth, y: point.y)
+
+        // If no inline tokens, draw plain text
+        if inlineTokens.isEmpty {
+            let attrString = NSAttributedString(string: contentText, attributes: theme.bodyAttributes)
+            drawAttributedString(attrString, at: contentPoint, in: context)
+            return
+        }
+
+        // Build drawing runs for content with inline formatting
+        var runs: [DrawingRun] = []
+        var currentX: CGFloat = 0
+        var processedEnd = contentStart  // Track position in original text
+
+        // Sort tokens by content start position
+        let sortedTokens = inlineTokens.sorted { $0.contentRange.lowerBound < $1.contentRange.lowerBound }
+
+        for inlineToken in sortedTokens {
+            // Find the earliest syntax range before content
+            let syntaxBefore = inlineToken.syntaxRanges.filter { $0.upperBound <= inlineToken.contentRange.lowerBound }
+            let syntaxStart = syntaxBefore.map(\.lowerBound).min() ?? inlineToken.contentRange.lowerBound
+
+            // Draw any plain text between last processed position and this token's syntax start
+            if processedEnd < syntaxStart {
+                let plainText = substring(of: text, from: processedEnd, to: syntaxStart)
+                if !plainText.isEmpty {
+                    runs.append(DrawingRun(
+                        text: plainText,
+                        attributes: theme.bodyAttributes,
+                        xOffset: currentX
+                    ))
+                    currentX += measureWidth(plainText, attributes: theme.bodyAttributes)
+                }
+            }
+
+            // Draw content with appropriate styling
+            let tokenContentText = substring(of: text, from: inlineToken.contentRange.lowerBound, to: inlineToken.contentRange.upperBound)
+            if !tokenContentText.isEmpty {
+                let attrs = attributesForElement(inlineToken.element)
+                runs.append(DrawingRun(
+                    text: tokenContentText,
+                    attributes: attrs,
+                    xOffset: currentX
+                ))
+                currentX += measureWidth(tokenContentText, attributes: attrs)
+            }
+
+            // Track where we've processed to (including trailing syntax)
+            let syntaxAfter = inlineToken.syntaxRanges.filter { $0.lowerBound >= inlineToken.contentRange.upperBound }
+            let endOfToken = syntaxAfter.map(\.upperBound).max() ?? inlineToken.contentRange.upperBound
+            processedEnd = max(processedEnd, endOfToken)
+        }
+
+        // Draw any remaining text after last token
+        if processedEnd < text.count {
+            let remainingText = substring(of: text, from: processedEnd, to: text.count)
+            if !remainingText.isEmpty {
+                runs.append(DrawingRun(
+                    text: remainingText,
+                    attributes: theme.bodyAttributes,
+                    xOffset: currentX
+                ))
+            }
+        }
+
+        // Execute drawing at content position
+        for run in runs {
+            let runPoint = CGPoint(x: contentPoint.x + run.xOffset, y: contentPoint.y)
+            let attrString = NSAttributedString(string: run.text, attributes: run.attributes)
+            drawAttributedString(attrString, at: runPoint, in: context)
+        }
+    }
+
+    // MARK: - Ordered List Item Drawing
+
+    /// Draw active ordered list item with syntax visible but muted.
+    /// Shows the 1., 2., etc. marker in muted color with proper indentation.
+    private func drawActiveOrderedListItem(text: String, token: MarkdownToken, number: Int, at point: CGPoint, in context: CGContext) {
+        let depth = token.nestingDepth
+        let indentPerLevel: CGFloat = 18.0
+        let totalIndent = CGFloat(depth - 1) * indentPerLevel  // depth 1 = no indent
+
+        // Draw the entire line with body styling
+        let attributedString = NSMutableAttributedString(
+            string: text,
+            attributes: theme.bodyAttributes
+        )
+
+        // Apply muted color to syntax characters (the "1. " marker)
+        for syntaxRange in token.syntaxRanges {
+            guard syntaxRange.upperBound <= text.count else { continue }
+            let nsRange = NSRange(location: syntaxRange.lowerBound, length: syntaxRange.count)
+            attributedString.addAttributes(theme.syntaxCharacterAttributes, range: nsRange)
+        }
+
+        // Draw at indented position
+        let indentedPoint = CGPoint(x: point.x + totalIndent, y: point.y)
+        drawAttributedString(attributedString, at: indentedPoint, in: context)
+    }
+
+    /// Draw inactive ordered list item with formatted number.
+    /// Hides the "1." syntax and replaces with a cleanly rendered number.
+    /// Numbers are right-aligned so single and double digits align properly.
+    /// Handles inline formatting within the list item content.
+    private func drawInactiveOrderedListItem(text: String, token: MarkdownToken, number: Int, at point: CGPoint, in context: CGContext) {
+        let depth = token.nestingDepth
+        let contentStart = token.contentRange.lowerBound
+
+        // Configuration for indentation
+        let indentPerLevel: CGFloat = 18.0
+        let numberColumnWidth: CGFloat = 20.0  // Fixed width for numbers (allows right alignment)
+        let numberRightPadding: CGFloat = 4.0  // Space between number and content
+        let totalIndent = CGFloat(depth - 1) * indentPerLevel  // depth 1 = no indent
+
+        // Draw the number with right alignment
+        let numberString = "\(number)."
+        let numberAttrString = NSAttributedString(string: numberString, attributes: theme.bodyAttributes)
+        let numberWidth = measureWidth(numberString, attributes: theme.bodyAttributes)
+        // Right-align the number within the column
+        let numberX = point.x + totalIndent + (numberColumnWidth - numberWidth)
+        let numberPoint = CGPoint(x: numberX, y: point.y)
+        drawAttributedString(numberAttrString, at: numberPoint, in: context)
+
+        // Get content text (without the marker prefix)
+        let contentText = String(text.dropFirst(contentStart))
+
+        // Filter inline tokens that fall within the content range and adjust their ranges
+        let inlineTokens = tokens.filter { t in
+            if case .orderedListItem = t.element { return false }
+            return t.contentRange.lowerBound >= contentStart
+        }
+
+        // Calculate content position (after number column)
+        let contentPoint = CGPoint(x: point.x + totalIndent + numberColumnWidth + numberRightPadding, y: point.y)
 
         // If no inline tokens, draw plain text
         if inlineTokens.isEmpty {
