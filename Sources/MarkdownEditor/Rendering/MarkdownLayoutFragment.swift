@@ -189,7 +189,22 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             return
         }
 
-        // Non-heading/non-blockquote: use existing logic
+        // Check if this is an unordered list item
+        let unorderedListToken = tokens.first {
+            if case .unorderedListItem = $0.element { return true }
+            return false
+        }
+
+        if let token = unorderedListToken {
+            if isActiveParagraph {
+                drawActiveUnorderedListItem(text: text, token: token, at: point, in: context)
+            } else {
+                drawInactiveUnorderedListItem(text: text, token: token, at: point, in: context)
+            }
+            return
+        }
+
+        // Non-heading/non-blockquote/non-list: use existing logic
         if isActiveParagraph {
             drawRawMarkdown(text: text, at: point, in: context)
         } else {
@@ -350,6 +365,133 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         let indentedPoint = CGPoint(x: point.x + totalIndent, y: point.y)
         for run in runs {
             let runPoint = CGPoint(x: indentedPoint.x + run.xOffset, y: indentedPoint.y)
+            let attrString = NSAttributedString(string: run.text, attributes: run.attributes)
+            drawAttributedString(attrString, at: runPoint, in: context)
+        }
+    }
+
+    // MARK: - Unordered List Item Drawing
+
+    /// Draw active unordered list item with syntax visible but muted.
+    /// Shows the -, *, or + marker in muted color with proper indentation.
+    private func drawActiveUnorderedListItem(text: String, token: MarkdownToken, at point: CGPoint, in context: CGContext) {
+        let depth = token.nestingDepth
+        let indentPerLevel: CGFloat = 20.0
+        let totalIndent = CGFloat(depth - 1) * indentPerLevel  // depth 1 = no indent
+
+        // Draw the entire line with body styling
+        let attributedString = NSMutableAttributedString(
+            string: text,
+            attributes: theme.bodyAttributes
+        )
+
+        // Apply muted color to syntax characters (the "- " or "* " or "+ " marker)
+        for syntaxRange in token.syntaxRanges {
+            guard syntaxRange.upperBound <= text.count else { continue }
+            let nsRange = NSRange(location: syntaxRange.lowerBound, length: syntaxRange.count)
+            attributedString.addAttributes(theme.syntaxCharacterAttributes, range: nsRange)
+        }
+
+        // Draw at indented position
+        let indentedPoint = CGPoint(x: point.x + totalIndent, y: point.y)
+        drawAttributedString(attributedString, at: indentedPoint, in: context)
+    }
+
+    /// Draw inactive unordered list item with bullet glyph.
+    /// Hides the -, *, + marker and replaces with bullet (•) character.
+    /// Handles inline formatting within the list item content.
+    private func drawInactiveUnorderedListItem(text: String, token: MarkdownToken, at point: CGPoint, in context: CGContext) {
+        let depth = token.nestingDepth
+        let contentStart = token.contentRange.lowerBound
+
+        // Configuration for indentation
+        let indentPerLevel: CGFloat = 20.0
+        let bulletWidth: CGFloat = 16.0  // Space for bullet glyph
+        let totalIndent = CGFloat(depth - 1) * indentPerLevel  // depth 1 = no indent
+
+        // Draw bullet glyph
+        let bulletString = NSAttributedString(string: "•", attributes: theme.bodyAttributes)
+        let bulletPoint = CGPoint(x: point.x + totalIndent, y: point.y)
+        drawAttributedString(bulletString, at: bulletPoint, in: context)
+
+        // Get content text (without the marker prefix)
+        let contentText = String(text.dropFirst(contentStart))
+
+        // Filter inline tokens that fall within the content range and adjust their ranges
+        let inlineTokens = tokens.filter { t in
+            if case .unorderedListItem = t.element { return false }
+            return t.contentRange.lowerBound >= contentStart
+        }
+
+        // Calculate content position (after bullet)
+        let contentPoint = CGPoint(x: point.x + totalIndent + bulletWidth, y: point.y)
+
+        // If no inline tokens, draw plain text
+        if inlineTokens.isEmpty {
+            let attrString = NSAttributedString(string: contentText, attributes: theme.bodyAttributes)
+            drawAttributedString(attrString, at: contentPoint, in: context)
+            return
+        }
+
+        // Build drawing runs for content with inline formatting
+        var runs: [DrawingRun] = []
+        var currentX: CGFloat = 0
+        var processedEnd = contentStart  // Track position in original text
+
+        // Sort tokens by content start position
+        let sortedTokens = inlineTokens.sorted { $0.contentRange.lowerBound < $1.contentRange.lowerBound }
+
+        for inlineToken in sortedTokens {
+            // Find the earliest syntax range before content
+            let syntaxBefore = inlineToken.syntaxRanges.filter { $0.upperBound <= inlineToken.contentRange.lowerBound }
+            let syntaxStart = syntaxBefore.map(\.lowerBound).min() ?? inlineToken.contentRange.lowerBound
+
+            // Draw any plain text between last processed position and this token's syntax start
+            if processedEnd < syntaxStart {
+                let plainText = substring(of: text, from: processedEnd, to: syntaxStart)
+                if !plainText.isEmpty {
+                    runs.append(DrawingRun(
+                        text: plainText,
+                        attributes: theme.bodyAttributes,
+                        xOffset: currentX
+                    ))
+                    currentX += measureWidth(plainText, attributes: theme.bodyAttributes)
+                }
+            }
+
+            // Draw content with appropriate styling
+            let tokenContentText = substring(of: text, from: inlineToken.contentRange.lowerBound, to: inlineToken.contentRange.upperBound)
+            if !tokenContentText.isEmpty {
+                let attrs = attributesForElement(inlineToken.element)
+                runs.append(DrawingRun(
+                    text: tokenContentText,
+                    attributes: attrs,
+                    xOffset: currentX
+                ))
+                currentX += measureWidth(tokenContentText, attributes: attrs)
+            }
+
+            // Track where we've processed to (including trailing syntax)
+            let syntaxAfter = inlineToken.syntaxRanges.filter { $0.lowerBound >= inlineToken.contentRange.upperBound }
+            let endOfToken = syntaxAfter.map(\.upperBound).max() ?? inlineToken.contentRange.upperBound
+            processedEnd = max(processedEnd, endOfToken)
+        }
+
+        // Draw any remaining text after last token
+        if processedEnd < text.count {
+            let remainingText = substring(of: text, from: processedEnd, to: text.count)
+            if !remainingText.isEmpty {
+                runs.append(DrawingRun(
+                    text: remainingText,
+                    attributes: theme.bodyAttributes,
+                    xOffset: currentX
+                ))
+            }
+        }
+
+        // Execute drawing at content position
+        for run in runs {
+            let runPoint = CGPoint(x: contentPoint.x + run.xOffset, y: contentPoint.y)
             let attrString = NSAttributedString(string: run.text, attributes: run.attributes)
             drawAttributedString(attrString, at: runPoint, in: context)
         }

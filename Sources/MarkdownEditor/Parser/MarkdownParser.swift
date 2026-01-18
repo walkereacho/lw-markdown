@@ -103,16 +103,22 @@ final class MarkdownParser: TokenProviding {
     }
 
     private func parseListItem(_ text: String) -> MarkdownToken? {
-        // Unordered: - item, * item, + item
-        let unorderedPattern = #/^([-*+])\s+(.+)$/#
+        // Unordered: - item, * item, + item (with optional leading indentation)
+        // Pattern: optional leading spaces, then -, *, or +, then space, then content
+        let unorderedPattern = #/^(\s*)([-*+])\s+(.+)$/#
 
-        if text.wholeMatch(of: unorderedPattern) != nil {
+        if let match = text.wholeMatch(of: unorderedPattern) {
+            let leadingSpaces = String(match.1)
+            let indentLength = leadingSpaces.count
+            // Calculate nesting depth: 2 spaces = 1 level of nesting
+            let nestingDepth = (indentLength / 2) + 1  // +1 because top-level is depth 1
             let markerLength = 1  // -, *, or +
-            let syntaxLength = markerLength + 1  // marker + space
+            let syntaxEnd = indentLength + markerLength + 1  // indent + marker + space
             return MarkdownToken(
                 element: .unorderedListItem,
-                contentRange: syntaxLength..<text.count,
-                syntaxRanges: [0..<syntaxLength]
+                contentRange: syntaxEnd..<text.count,
+                syntaxRanges: [indentLength..<syntaxEnd],  // Only marker + space is syntax
+                nestingDepth: nestingDepth
             )
         }
 
