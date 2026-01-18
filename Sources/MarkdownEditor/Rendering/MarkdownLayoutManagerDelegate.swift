@@ -42,18 +42,18 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
         }
 
         // Parse tokens for this paragraph
-        let text = paragraph.attributedString.string
+        // Note: NSTextParagraph includes trailing newline; strip it for parsing
+        let rawText = paragraph.attributedString.string
+        let text = rawText.trimmingCharacters(in: .newlines)
         let tokens = tokenProvider.parse(text)
 
-        // Check if this is the active paragraph (PANE-LOCAL)
-        let isActive = pane.isActiveParagraph(at: paragraphIndex)
-
-        // Return custom fragment
+        // Return custom fragment (checks active state at draw time, not creation time)
         return MarkdownLayoutFragment(
             textElement: paragraph,
             range: paragraph.elementRange,
             tokens: tokens,
-            isActiveParagraph: isActive,
+            paragraphIndex: paragraphIndex,
+            paneController: pane,
             theme: theme
         )
     }

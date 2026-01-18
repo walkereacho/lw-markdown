@@ -16,11 +16,19 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     /// Parsed Markdown tokens for this paragraph.
     let tokens: [MarkdownToken]
 
-    /// Whether cursor is in this paragraph (PANE-LOCAL state).
-    let isActiveParagraph: Bool
+    /// Paragraph index for checking active state at draw time.
+    let paragraphIndex: Int
+
+    /// Reference to pane controller for checking active state.
+    weak var paneController: PaneController?
 
     /// Theme for visual styling.
     let theme: SyntaxTheme
+
+    /// Check if this paragraph is currently active (at draw time, not creation time).
+    private var isActiveParagraph: Bool {
+        paneController?.isActiveParagraph(at: paragraphIndex) ?? false
+    }
 
     // MARK: - Initialization
 
@@ -28,17 +36,49 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         textElement: NSTextElement,
         range: NSTextRange?,
         tokens: [MarkdownToken],
-        isActiveParagraph: Bool,
+        paragraphIndex: Int,
+        paneController: PaneController?,
         theme: SyntaxTheme
     ) {
         self.tokens = tokens
-        self.isActiveParagraph = isActiveParagraph
+        self.paragraphIndex = paragraphIndex
+        self.paneController = paneController
         self.theme = theme
         super.init(textElement: textElement, range: range)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not implemented")
+    }
+
+    // MARK: - Layout Bounds
+
+    /// Override to provide bounds that accommodate larger fonts (headings).
+    override var renderingSurfaceBounds: CGRect {
+        let baseBounds = super.renderingSurfaceBounds
+
+        // Find the maximum line height needed based on tokens
+        var maxHeight: CGFloat = baseBounds.height
+
+        for token in tokens {
+            if case .heading(let level) = token.element {
+                let font = theme.headingFonts[level] ?? theme.bodyFont
+                let lineHeight = font.ascender - font.descender + font.leading
+                maxHeight = max(maxHeight, lineHeight + 8)  // Add padding
+            }
+        }
+
+        // Return expanded bounds if needed
+        if maxHeight > baseBounds.height {
+            return CGRect(
+                x: baseBounds.origin.x,
+                y: baseBounds.origin.y,
+                width: baseBounds.width,
+                height: maxHeight
+            )
+        }
+
+        return baseBounds
     }
 
     // MARK: - Drawing
@@ -51,28 +91,83 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
         let text = paragraph.attributedString.string
 
-        if isActiveParagraph {
-            drawRawMarkdown(text: text, at: point, in: context)
-        } else {
-            drawFormattedMarkdown(text: text, at: point, in: context)
+        // Check if this is a heading
+        let headingToken = tokens.first {
+            if case .heading = $0.element { return true }
+            return false
         }
+
+        if let token = headingToken, case .heading(let level) = token.element {
+            if isActiveParagraph {
+                // Active: draw with syntax visible (muted color)
+                drawActiveHeading(text: text, level: level, token: token, at: point, in: context)
+            } else {
+                // Inactive: draw without syntax (content only)
+                drawInactiveHeading(text: text, level: level, token: token, at: point, in: context)
+            }
+        } else {
+            // Non-heading: use existing logic
+            if isActiveParagraph {
+                drawRawMarkdown(text: text, at: point, in: context)
+            } else {
+                drawFormattedMarkdown(text: text, at: point, in: context)
+            }
+        }
+    }
+
+    // MARK: - Heading Drawing
+
+    /// Draw active heading with syntax visible but muted.
+    /// Storage has heading font, so TextKit 2 calculates correct metrics.
+    private func drawActiveHeading(text: String, level: Int, token: MarkdownToken, at point: CGPoint, in context: CGContext) {
+        // Use existing drawRawMarkdown which handles muted syntax colors correctly
+        drawRawMarkdown(text: text, at: point, in: context)
+    }
+
+    /// Draw inactive heading with syntax hidden.
+    /// Draws only the content portion at the original point.
+    private func drawInactiveHeading(text: String, level: Int, token: MarkdownToken, at point: CGPoint, in context: CGContext) {
+        // Draw content only (without the "# " prefix)
+        let contentText = String(text.dropFirst(token.contentRange.lowerBound))
+        let attrString = NSAttributedString(string: contentText, attributes: theme.headingAttributes(level: level))
+        drawAttributedString(attrString, at: point, in: context)
     }
 
     // MARK: - Raw Markdown Drawing (Active Paragraph)
 
     /// Draw with all syntax characters visible but muted.
+    /// Headings still render at heading size for visual consistency.
     private func drawRawMarkdown(text: String, at point: CGPoint, in context: CGContext) {
+        // Check if this is a heading line
+        let headingToken = tokens.first { token in
+            if case .heading = token.element { return true }
+            return false
+        }
+
+        let baseAttributes: [NSAttributedString.Key: Any]
+        if let token = headingToken, case .heading(let level) = token.element {
+            // Use heading font for heading lines
+            baseAttributes = theme.headingAttributes(level: level)
+        } else {
+            baseAttributes = theme.bodyAttributes
+        }
+
         let attributedString = NSMutableAttributedString(
             string: text,
-            attributes: theme.bodyAttributes
+            attributes: baseAttributes
         )
 
-        // Apply muted color to syntax characters
+        // Apply muted color to syntax characters (keeping heading font size)
         for token in tokens {
             for syntaxRange in token.syntaxRanges {
                 guard syntaxRange.upperBound <= text.count else { continue }
                 let nsRange = NSRange(location: syntaxRange.lowerBound, length: syntaxRange.count)
-                attributedString.addAttributes(theme.syntaxCharacterAttributes, range: nsRange)
+                // Merge syntax styling with current font
+                var syntaxAttrs = theme.syntaxCharacterAttributes
+                if let font = baseAttributes[.font] as? NSFont {
+                    syntaxAttrs[.font] = font
+                }
+                attributedString.addAttributes(syntaxAttrs, range: nsRange)
             }
         }
 

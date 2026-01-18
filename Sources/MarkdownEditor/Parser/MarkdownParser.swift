@@ -48,9 +48,9 @@ final class MarkdownParser: TokenProviding {
     // MARK: - Block-Level Parsing
 
     private func parseHeading(_ text: String) -> MarkdownToken? {
-        // Pattern: 1-6 # characters, followed by space, then content
-        // ^(#{1,6})\s+(.+)$
-        let pattern = #/^(#{1,6})\s+(.+)$/#
+        // Pattern: 1-6 # characters, followed by space, then optional content
+        // Using (.*)$ allows heading to be recognized as soon as "# " is typed
+        let pattern = #/^(#{1,6})\s+(.*)$/#
 
         guard let match = text.wholeMatch(of: pattern) else { return nil }
 

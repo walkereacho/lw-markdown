@@ -42,6 +42,9 @@ final class PaneController: NSObject {
     private var cursorDebounceTimer: DispatchWorkItem?
     private let cursorDebounceInterval: TimeInterval = 0.016  // ~1 frame at 60fps
 
+    /// Reentrancy guard for heading font application.
+    private var isApplyingHeadingFonts = false
+
     // MARK: - Initialization
 
     init(document: DocumentModel, frame: NSRect) {
@@ -76,6 +79,9 @@ final class PaneController: NSObject {
 
         // Configure text view
         configureTextView()
+
+        // Apply pending content now that layout infrastructure is ready
+        document.applyPendingContent()
     }
 
     deinit {
@@ -87,6 +93,10 @@ final class PaneController: NSObject {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.textContainerInset = NSSize(width: 20, height: 20)
+
+        // Explicitly enable editing and selection
+        textView.isEditable = true
+        textView.isSelectable = true
 
         textView.isRichText = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -104,6 +114,50 @@ final class PaneController: NSObject {
     /// Set the token provider (when Parser module is ready).
     func setTokenProvider(_ provider: TokenProviding) {
         layoutDelegate.tokenProvider = provider
+    }
+
+    // MARK: - Font Attribute Styling
+
+    /// Apply heading fonts to storage so TextKit 2 calculates correct cursor metrics.
+    /// Uses reentrancy guard to prevent infinite loops.
+    private func applyHeadingFontsToStorage() {
+        guard !isApplyingHeadingFonts else { return }
+        guard document != nil,
+              let textStorage = textView.textStorage else { return }
+
+        isApplyingHeadingFonts = true
+        defer { isApplyingHeadingFonts = false }
+
+        let text = textStorage.string
+        guard !text.isEmpty else { return }
+
+        let theme = SyntaxTheme.default
+
+        textStorage.beginEditing()
+
+        // Reset to body font
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+        textStorage.addAttribute(.font, value: theme.bodyFont, range: fullRange)
+
+        // Apply heading fonts
+        let paragraphs = text.components(separatedBy: "\n")
+        var offset = 0
+
+        for para in paragraphs {
+            let tokens = layoutDelegate.tokenProvider.parse(para)
+            for token in tokens {
+                if case .heading(let level) = token.element {
+                    let font = theme.headingFonts[level] ?? theme.bodyFont
+                    let range = NSRange(location: offset, length: para.count)
+                    if range.location + range.length <= textStorage.length {
+                        textStorage.addAttribute(.font, value: font, range: range)
+                    }
+                }
+            }
+            offset += para.count + 1
+        }
+
+        textStorage.endEditing()
     }
 
     // MARK: - Active Paragraph
@@ -143,21 +197,19 @@ final class PaneController: NSObject {
         // Only update if changed
         guard newIndex != activeParagraphIndex else { return }
 
-        let previousIndex = activeParagraphIndex
         activeParagraphIndex = newIndex
 
-        // Invalidate layout for affected paragraphs
-        // This triggers redraw with new active state
-        if let prevIdx = previousIndex,
-           let range = document.paragraphRange(at: prevIdx) {
-            layoutManager.invalidateLayout(for: range)
+        // TextKit 2 caches layout fragments. Force fragment recreation by
+        // detaching and reattaching the text container.
+        if let textContainer = layoutManager.textContainer {
+            layoutManager.textContainer = nil
+            layoutManager.textContainer = textContainer
         }
 
-        if let newIdx = newIndex,
-           let range = document.paragraphRange(at: newIdx) {
-            layoutManager.invalidateLayout(for: range)
-        }
+        // Force immediate redraw
+        textView.display()
     }
+
 }
 
 // MARK: - NSTextViewDelegate
@@ -170,8 +222,10 @@ extension PaneController: NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         // Notify document of content change for cache invalidation
-        // (Full implementation would pass edit range, simplified here)
         let range = document?.contentStorage.documentRange ?? layoutManager.documentRange
         document?.contentDidChange(in: range, changeInLength: 0)
+
+        // Apply heading fonts for correct cursor metrics
+        applyHeadingFontsToStorage()
     }
 }
