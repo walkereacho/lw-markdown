@@ -198,11 +198,13 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
 
     // MARK: - NSTextStorageDelegate
 
-    /// Apply heading fonts BEFORE TextKit 2 creates layout fragments.
+    /// Apply fonts BEFORE TextKit 2 creates layout fragments.
     /// This ensures fragments are created with correct line height metrics.
     ///
+    /// Handles: headings (h1-h6), code blocks (fenced with ``` or ~~~)
+    ///
     /// Strategy:
-    /// - If paragraph TYPE changes (body↔heading), apply font to whole paragraph
+    /// - If paragraph TYPE changes (body↔heading↔code), apply font to whole paragraph
     /// - If type stays same, only apply to edited range (avoids cursor jump)
     func textStorage(
         _ textStorage: NSTextStorage,
@@ -226,48 +228,89 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         let paragraphText = (text as NSString).substring(with: paragraphRange)
         let trimmedText = paragraphText.trimmingCharacters(in: .newlines)
 
-        // Parse to determine current paragraph type
+        // Check if this paragraph is inside a code block
+        let codeBlockStatus = detectCodeBlockStatus(at: paragraphRange.location, in: text)
+
+        // Parse to determine current paragraph type (only if not in code block)
         let tokens = MarkdownParser.shared.parse(trimmedText)
-        let currentHeadingLevel = tokens.compactMap { token -> Int? in
+
+        // Extract element types from tokens
+        let currentHeadingLevel: Int? = codeBlockStatus == .notInCodeBlock ? tokens.compactMap { token -> Int? in
             if case .heading(let level) = token.element { return level }
             return nil
-        }.first
+        }.first : nil
 
-        // Determine target font based on current paragraph type
+        let blockquoteDepth: Int? = codeBlockStatus == .notInCodeBlock ? tokens.compactMap { token -> Int? in
+            if case .blockquote = token.element { return token.nestingDepth }
+            return nil
+        }.first : nil
+
+        let unorderedListDepth: Int? = codeBlockStatus == .notInCodeBlock ? tokens.compactMap { token -> Int? in
+            if case .unorderedListItem = token.element { return token.nestingDepth }
+            return nil
+        }.first : nil
+
+        let orderedListDepth: Int? = codeBlockStatus == .notInCodeBlock ? tokens.compactMap { token -> Int? in
+            if case .orderedListItem = token.element { return token.nestingDepth }
+            return nil
+        }.first : nil
+
+        // Determine current type and target font
+        let currentType: ParagraphType
         let targetFont: NSFont
-        if let level = currentHeadingLevel {
+
+        if codeBlockStatus != .notInCodeBlock {
+            currentType = .codeBlock
+            targetFont = theme.codeFont
+        } else if let level = currentHeadingLevel {
+            currentType = .heading(level)
             targetFont = theme.headingFonts[level] ?? theme.bodyFont
+        } else if let depth = blockquoteDepth {
+            currentType = .blockquote
+            targetFont = theme.italicFont
+            _ = depth // Depth used for indentation if needed later
+        } else if let depth = unorderedListDepth {
+            currentType = .unorderedList(depth: depth)
+            targetFont = theme.bodyFont
+        } else if let depth = orderedListDepth {
+            currentType = .orderedList(depth: depth)
+            targetFont = theme.bodyFont
         } else {
+            currentType = .body
             targetFont = theme.bodyFont
         }
 
-        // Detect previous paragraph type by checking existing font at paragraph start
+        // Detect previous paragraph type
         let existingFont = textStorage.attribute(.font, at: paragraphRange.location, effectiveRange: nil) as? NSFont
-        let previousHeadingLevel: Int? = {
-            guard let font = existingFont else { return nil }
-            for (level, headingFont) in theme.headingFonts {
-                if font == headingFont { return level }
-            }
-            return nil  // Was body text (or unknown font)
-        }()
+        let existingStyle = textStorage.attribute(.paragraphStyle, at: paragraphRange.location, effectiveRange: nil) as? NSParagraphStyle
+        let previousType = detectPreviousParagraphType(font: existingFont, paragraphStyle: existingStyle, theme: theme)
 
         // Check if paragraph TYPE changed
-        let typeChanged = currentHeadingLevel != previousHeadingLevel
+        let typeChanged = currentType != previousType
+
+        // Calculate attribute range (excluding trailing newline)
+        var attributeRange = paragraphRange
+        if paragraphText.hasSuffix("\n") {
+            attributeRange.length -= 1
+        }
+        guard attributeRange.length > 0 else { return }
 
         if typeChanged {
-            // Type changed: apply font to entire paragraph (excluding trailing newline)
-            var attributeRange = paragraphRange
-            if paragraphText.hasSuffix("\n") {
-                attributeRange.length -= 1
-            }
-            guard attributeRange.length > 0 else { return }
+            // Type changed: apply font and paragraph style to entire paragraph
             textStorage.addAttribute(.font, value: targetFont, range: attributeRange)
 
+            // Apply paragraph style for indented elements
+            if let paragraphStyle = paragraphStyleForType(currentType) {
+                textStorage.addAttribute(.paragraphStyle, value: paragraphStyle, range: attributeRange)
+            } else {
+                // Remove paragraph style for non-indented elements
+                textStorage.removeAttribute(.paragraphStyle, range: attributeRange)
+            }
+
             // Remember where cursor SHOULD be after edit completes
-            // (addAttribute moves cursor to end of range, so we need to restore it)
             cursorRestorePosition = editedRange.location + editedRange.length
         } else {
-            // Type unchanged: only apply to edited range (avoids cursor jump)
+            // Type unchanged: only apply font to edited range (avoids cursor jump)
             guard editedRange.length > 0, editedRange.location < textStorage.length else { return }
             let safeRange = NSRange(
                 location: editedRange.location,
@@ -275,5 +318,146 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
             )
             textStorage.addAttribute(.font, value: targetFont, range: safeRange)
         }
+    }
+
+    /// Create paragraph style for indented element types.
+    private func paragraphStyleForType(_ type: ParagraphType) -> NSParagraphStyle? {
+        let style = NSMutableParagraphStyle()
+
+        switch type {
+        case .unorderedList(let depth):
+            // Match indentation from MarkdownLayoutFragment
+            let indentPerLevel: CGFloat = 20.0
+            let bulletWidth: CGFloat = 16.0
+            let baseIndent = CGFloat(depth - 1) * indentPerLevel
+            style.headIndent = baseIndent + bulletWidth
+            style.firstLineHeadIndent = baseIndent
+            return style
+
+        case .orderedList(let depth):
+            // Match indentation from MarkdownLayoutFragment
+            let indentPerLevel: CGFloat = 18.0
+            let numberColumnWidth: CGFloat = 20.0
+            let numberRightPadding: CGFloat = 4.0
+            let baseIndent = CGFloat(depth - 1) * indentPerLevel
+            style.headIndent = baseIndent + numberColumnWidth + numberRightPadding
+            style.firstLineHeadIndent = baseIndent
+            return style
+
+        case .blockquote:
+            // Blockquotes have vertical bar + indent
+            let barSpacing: CGFloat = 12.0
+            let contentIndent: CGFloat = 8.0
+            style.headIndent = barSpacing + contentIndent
+            style.firstLineHeadIndent = 0
+            return style
+
+        default:
+            return nil
+        }
+    }
+
+    // MARK: - Code Block Detection
+
+    private enum CodeBlockStatus {
+        case notInCodeBlock
+        case openingFence
+        case insideCodeBlock
+        case closingFence
+    }
+
+    private enum ParagraphType: Equatable {
+        case body
+        case heading(Int)
+        case codeBlock
+        case blockquote
+        case unorderedList(depth: Int)
+        case orderedList(depth: Int)
+    }
+
+    /// Detect if the given character offset is inside a code block.
+    /// Scans from document start to determine fence state.
+    private func detectCodeBlockStatus(at offset: Int, in text: String) -> CodeBlockStatus {
+        let paragraphs = text.components(separatedBy: "\n")
+
+        // Find which paragraph index contains this offset
+        var currentOffset = 0
+        var targetParagraphIndex = 0
+        for (i, para) in paragraphs.enumerated() {
+            let paraLength = para.count + 1 // +1 for newline
+            if currentOffset + paraLength > offset {
+                targetParagraphIndex = i
+                break
+            }
+            currentOffset += paraLength
+        }
+
+        // Scan paragraphs to determine code block state
+        var inCodeBlock = false
+
+        for i in 0..<paragraphs.count {
+            let trimmed = paragraphs[i].trimmingCharacters(in: .whitespaces)
+            let isFence = trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~")
+
+            if i == targetParagraphIndex {
+                // This is the paragraph we're checking
+                if isFence {
+                    return inCodeBlock ? .closingFence : .openingFence
+                } else {
+                    return inCodeBlock ? .insideCodeBlock : .notInCodeBlock
+                }
+            }
+
+            // Update state for next iteration
+            if isFence {
+                inCodeBlock = !inCodeBlock
+            }
+        }
+
+        return .notInCodeBlock
+    }
+
+    /// Detect previous paragraph type from its font and paragraph style.
+    private func detectPreviousParagraphType(font: NSFont?, paragraphStyle: NSParagraphStyle?, theme: SyntaxTheme) -> ParagraphType {
+        // Check paragraph style first for list detection
+        if let style = paragraphStyle, style.headIndent > 0 {
+            // Has indentation - likely a list or blockquote
+            // Use headIndent values to distinguish types
+            let headIndent = style.headIndent
+
+            // Check for unordered list pattern (bulletWidth = 16)
+            if headIndent.truncatingRemainder(dividingBy: 20.0) == 16.0 ||
+               headIndent == 16.0 {
+                let depth = Int((headIndent - 16.0) / 20.0) + 1
+                return .unorderedList(depth: max(1, depth))
+            }
+
+            // Check for ordered list pattern (numberColumnWidth + padding = 24)
+            if headIndent.truncatingRemainder(dividingBy: 18.0) == 24.0 ||
+               headIndent == 24.0 {
+                let depth = Int((headIndent - 24.0) / 18.0) + 1
+                return .orderedList(depth: max(1, depth))
+            }
+
+            // Check for blockquote pattern (barSpacing + contentIndent = 20)
+            if headIndent == 20.0 {
+                return .blockquote
+            }
+        }
+
+        guard let font = font else { return .body }
+
+        // Check if it's a heading font
+        for (level, headingFont) in theme.headingFonts {
+            if font == headingFont { return .heading(level) }
+        }
+
+        // Check if it's the code font
+        if font == theme.codeFont { return .codeBlock }
+
+        // Check if it's italic font (blockquote)
+        if font == theme.italicFont { return .blockquote }
+
+        return .body
     }
 }

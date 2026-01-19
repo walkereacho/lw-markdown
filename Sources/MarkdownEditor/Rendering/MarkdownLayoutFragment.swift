@@ -262,17 +262,18 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     /// Draw active blockquote with syntax visible but muted.
     /// Shows the '>' prefix characters in muted color.
     private func drawActiveBlockquote(text: String, token: MarkdownToken, at point: CGPoint, in context: CGContext) {
-        // Draw the entire line with body styling
+        // Draw the entire line with blockquote styling (italic font)
         let attributedString = NSMutableAttributedString(
             string: text,
             attributes: theme.blockquoteAttributes
         )
 
         // Apply muted color to syntax characters (the ">" prefix)
+        // IMPORTANT: Only change color, keep the same font to match storage metrics
         for syntaxRange in token.syntaxRanges {
             guard syntaxRange.upperBound <= text.count else { continue }
             let nsRange = NSRange(location: syntaxRange.lowerBound, length: syntaxRange.count)
-            attributedString.addAttributes(theme.syntaxCharacterAttributes, range: nsRange)
+            attributedString.addAttribute(.foregroundColor, value: theme.syntaxCharacterColor, range: nsRange)
         }
 
         drawAttributedString(attributedString, at: point, in: context)
@@ -414,10 +415,11 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         )
 
         // Apply muted color to syntax characters (the "- " or "* " or "+ " marker)
+        // IMPORTANT: Only change color, keep the same font to match storage metrics
         for syntaxRange in token.syntaxRanges {
             guard syntaxRange.upperBound <= text.count else { continue }
             let nsRange = NSRange(location: syntaxRange.lowerBound, length: syntaxRange.count)
-            attributedString.addAttributes(theme.syntaxCharacterAttributes, range: nsRange)
+            attributedString.addAttribute(.foregroundColor, value: theme.syntaxCharacterColor, range: nsRange)
         }
 
         // Draw at indented position
@@ -541,10 +543,11 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         )
 
         // Apply muted color to syntax characters (the "1. " marker)
+        // IMPORTANT: Only change color, keep the same font to match storage metrics
         for syntaxRange in token.syntaxRanges {
             guard syntaxRange.upperBound <= text.count else { continue }
             let nsRange = NSRange(location: syntaxRange.lowerBound, length: syntaxRange.count)
-            attributedString.addAttributes(theme.syntaxCharacterAttributes, range: nsRange)
+            attributedString.addAttribute(.foregroundColor, value: theme.syntaxCharacterColor, range: nsRange)
         }
 
         // Draw at indented position
