@@ -92,11 +92,11 @@ final class PaneController: NSObject {
     /// Initialize rendering state after content is loaded.
     /// Sets up heading fonts and active paragraph for correct initial display.
     private func initializeAfterContentLoad() {
-        // Apply heading fonts so TextKit 2 calculates correct metrics
-        applyHeadingFontsToStorage()
+        // Apply heading fonts so TextKit 2 calculates correct metrics (O(N) on load only)
+        applyHeadingFontsToAllParagraphs()
 
-        // Update block context for fenced code blocks
-        updateBlockContext()
+        // Update block context for fenced code blocks (O(N) on load only)
+        updateBlockContextFull()
 
         // Set initial active paragraph to 0 (cursor starts at beginning)
         activeParagraphIndex = 0
@@ -108,8 +108,24 @@ final class PaneController: NSObject {
         }
     }
 
-    /// Update block context by scanning all paragraphs for multi-line constructs.
+    /// Update block context incrementally from the edited paragraph. O(K).
     private func updateBlockContext() {
+        guard let text = textView.textStorage?.string else { return }
+        let paragraphs = text.components(separatedBy: "\n")
+
+        // Get the edited paragraph index from cursor position
+        guard let location = cursorTextLocation,
+              let editedIndex = document?.paragraphIndex(for: location) else {
+            // Fallback to full scan if we can't determine edit location
+            layoutDelegate.updateBlockContext(paragraphs: paragraphs)
+            return
+        }
+
+        layoutDelegate.updateBlockContextIncremental(afterEditAt: editedIndex, paragraphs: paragraphs)
+    }
+
+    /// Update block context by scanning all paragraphs. O(N) - for initialization only.
+    private func updateBlockContextFull() {
         guard let text = textView.textStorage?.string else { return }
         let paragraphs = text.components(separatedBy: "\n")
         layoutDelegate.updateBlockContext(paragraphs: paragraphs)
@@ -152,9 +168,8 @@ final class PaneController: NSObject {
 
     // MARK: - Font Attribute Styling
 
-    /// Apply heading fonts to storage so TextKit 2 calculates correct cursor metrics.
-    /// Uses reentrancy guard to prevent infinite loops.
-    private func applyHeadingFontsToStorage() {
+    /// Apply heading fonts to ALL paragraphs. O(N) - only for initialization.
+    private func applyHeadingFontsToAllParagraphs() {
         guard !isApplyingHeadingFonts else { return }
         guard document != nil,
               let textStorage = textView.textStorage else { return }
@@ -231,17 +246,32 @@ final class PaneController: NSObject {
         // Only update if changed
         guard newIndex != activeParagraphIndex else { return }
 
+        let oldIndex = activeParagraphIndex
         activeParagraphIndex = newIndex
 
-        // TextKit 2 caches layout fragments. Force fragment recreation by
-        // detaching and reattaching the text container.
-        if let textContainer = layoutManager.textContainer {
-            layoutManager.textContainer = nil
-            layoutManager.textContainer = textContainer
-        }
+        // Invalidate display for only the affected paragraphs (old and new active)
+        invalidateParagraphDisplay(at: oldIndex)
+        invalidateParagraphDisplay(at: newIndex)
+    }
 
-        // Force immediate redraw
-        textView.display()
+    /// Invalidate layout for a specific paragraph to force fragment recreation.
+    /// Uses content storage notification to trigger delegate callback.
+    private func invalidateParagraphDisplay(at index: Int?) {
+        guard let index = index,
+              let document = document,
+              let range = document.paragraphRange(at: index) else { return }
+
+        // Convert NSTextRange to NSRange for the content storage
+        let contentStorage = document.contentStorage
+        let startOffset = contentStorage.offset(from: contentStorage.documentRange.location, to: range.location)
+        let endOffset = contentStorage.offset(from: contentStorage.documentRange.location, to: range.endLocation)
+        let nsRange = NSRange(location: startOffset, length: endOffset - startOffset)
+
+        // Trigger layout invalidation by notifying the content storage of a "change"
+        // This is a zero-length edit that forces re-layout without modifying content
+        contentStorage.performEditingTransaction {
+            contentStorage.textStorage?.edited(.editedAttributes, range: nsRange, changeInLength: 0)
+        }
     }
 
 }
@@ -259,10 +289,20 @@ extension PaneController: NSTextViewDelegate {
         let range = document?.contentStorage.documentRange ?? layoutManager.documentRange
         document?.contentDidChange(in: range, changeInLength: 0)
 
-        // Apply heading fonts for correct cursor metrics
-        applyHeadingFontsToStorage()
+        // Note: Heading fonts are now applied in DocumentModel.willProcessEditing
+        // BEFORE TextKit 2 creates layout fragments, ensuring correct metrics.
+
+        // Restore cursor position if a paragraph type change moved it
+        if let restorePosition = document?.cursorRestorePosition {
+            document?.cursorRestorePosition = nil  // Clear immediately to avoid loops
+            let safePosition = min(restorePosition, textView.string.count)
+            textView.setSelectedRange(NSRange(location: safePosition, length: 0))
+        }
 
         // Update block context for fenced code blocks
         updateBlockContext()
+
+        // Scroll to keep cursor visible
+        textView.scrollRangeToVisible(textView.selectedRange())
     }
 }

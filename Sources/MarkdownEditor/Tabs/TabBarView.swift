@@ -8,6 +8,9 @@ final class TabBarView: NSView {
     /// Tab manager providing tab state.
     weak var tabManager: TabManager? {
         didSet {
+            tabManager?.onTabsChanged = { [weak self] in
+                self?.rebuildTabs()
+            }
             rebuildTabs()
         }
     }

@@ -18,6 +18,9 @@ final class TabManager: TabManaging {
     /// Callback when active tab changes.
     var onActiveTabChanged: ((UUID?) -> Void)?
 
+    /// Callback when tabs are added or removed.
+    var onTabsChanged: (() -> Void)?
+
     /// Callback before closing a dirty document (for save prompts).
     /// Return true to proceed with close, false to cancel.
     var onCloseConfirmation: ((DocumentModel) -> Bool)?
@@ -46,6 +49,7 @@ final class TabManager: TabManaging {
         documents[document.id] = document
         tabOrder.append(document.id)
         activateTab(documentId: document.id)
+        onTabsChanged?()
     }
 
     func closeTab(documentId: UUID) -> Bool {
@@ -68,6 +72,13 @@ final class TabManager: TabManaging {
         if activeDocumentId == documentId {
             activeDocumentId = tabOrder.last
             onActiveTabChanged?(activeDocumentId)
+        }
+
+        onTabsChanged?()
+
+        // Ensure we always have at least one tab
+        if tabOrder.isEmpty {
+            _ = newDocument()
         }
 
         return true

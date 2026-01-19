@@ -290,9 +290,10 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         let contentIndent: CGFloat = 8.0  // Space between last bar and content
         let totalIndent = CGFloat(depth) * barSpacing + contentIndent
 
-        // Get line height for proper bar height
+        // Use font-based height for bars to avoid extending into trailing newline space.
+        // Each blockquote line is independent, so we don't need continuous backgrounds.
         let font = theme.blockquoteAttributes[.font] as? NSFont ?? theme.bodyFont
-        let lineHeight = font.ascender - font.descender + font.leading
+        let barHeight = font.ascender - font.descender + font.leading
 
         // Draw vertical bars for each nesting level
         context.saveGState()
@@ -304,7 +305,7 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
                 x: barX,
                 y: point.y,
                 width: barWidth,
-                height: lineHeight
+                height: barHeight
             )
             context.fill(barRect)
         }
@@ -358,9 +359,9 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             if !tokenContentText.isEmpty {
                 var attrs = attributesForElement(inlineToken.element)
                 // Apply blockquote color to inline elements
-                if let _ = attrs[.foregroundColor] {
-                    attrs[.foregroundColor] = theme.blockquoteColor
-                }
+                attrs[.foregroundColor] = theme.blockquoteColor
+                // Remove background color for inline code - it clashes with blockquote styling
+                attrs.removeValue(forKey: .backgroundColor)
                 runs.append(DrawingRun(
                     text: tokenContentText,
                     attributes: attrs,

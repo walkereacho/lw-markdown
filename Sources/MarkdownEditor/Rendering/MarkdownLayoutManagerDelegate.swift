@@ -27,9 +27,14 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
     /// Current block context (updated on document change).
     private(set) var blockContext = BlockContext()
 
-    /// Update block context by scanning all paragraphs.
+    /// Update block context by scanning all paragraphs. O(N) - for initialization only.
     func updateBlockContext(paragraphs: [String]) {
         blockContext = blockContextScanner.scan(paragraphs: paragraphs)
+    }
+
+    /// Incrementally update block context after an edit. O(K) where K is affected paragraphs.
+    func updateBlockContextIncremental(afterEditAt paragraphIndex: Int, paragraphs: [String]) {
+        blockContextScanner.update(context: &blockContext, afterEditAt: paragraphIndex, paragraphs: paragraphs)
     }
 
     // MARK: - NSTextLayoutManagerDelegate

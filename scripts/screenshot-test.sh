@@ -58,10 +58,10 @@ fi
 
 # Capture screenshot
 echo "Capturing window $WINDOW_ID..."
-screencapture -x -l "$WINDOW_ID" /tmp/sc.png
+screencapture -x -o -l "$WINDOW_ID" /tmp/sc.png
 
 # Compress for efficient reading
-sips -Z 1024 -s format jpeg -s formatOptions 60 /tmp/sc.png --out "$OUTPUT_FILE" 2>/dev/null
+sips -Z 1024 -s format jpeg -s formatOptions 80 /tmp/sc.png --out "$OUTPUT_FILE" 2>/dev/null
 rm /tmp/sc.png
 
 # Cleanup app

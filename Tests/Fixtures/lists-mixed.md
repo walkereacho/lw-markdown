@@ -10,7 +10,7 @@ Ordered list with unordered sub-items:
    - Another detail
    - Yet another detail
 3. Third main topic
-
+ 
 Unordered list with ordered sub-items:
 
 - Shopping list

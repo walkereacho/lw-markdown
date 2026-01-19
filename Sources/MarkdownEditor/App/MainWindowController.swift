@@ -118,6 +118,9 @@ final class MainWindowController: NSWindowController {
             self?.tabBarView?.rebuildTabs()
             return self?.confirmClose(document: document) ?? true
         }
+
+        // Create initial empty document so tabs are never empty
+        newDocument()
     }
 
     // MARK: - Document Operations

@@ -22,6 +22,11 @@ enum DocumentError: LocalizedError {
 /// (colors, fonts for formatting) to the content storage. Rendering happens
 /// at the layout layer via `NSTextLayoutFragment` subclasses.
 ///
+/// **Exception:** Font attributes ARE applied to storage for heading lines.
+/// This is required for TextKit 2 to calculate correct cursor metrics and
+/// line heights. These fonts are applied in `willProcessEditing` BEFORE
+/// layout fragments are created, ensuring correct metrics from the start.
+///
 /// This design enables:
 /// - Clean undo (only content changes recorded)
 /// - Multiple panes with different "active paragraph" states
@@ -31,7 +36,7 @@ enum DocumentError: LocalizedError {
 /// When loading from file, content is NOT applied until `applyPendingContent()`
 /// is called. This ensures the layout manager is connected first, which is
 /// required for proper TextKit 2 text element enumeration and editing.
-final class DocumentModel {
+final class DocumentModel: NSObject, NSTextStorageDelegate {
 
     /// Unique identifier for this document.
     let id: UUID
@@ -67,15 +72,22 @@ final class DocumentModel {
     /// Content loaded from file, waiting to be applied after layout is ready.
     private var pendingContent: String?
 
+    /// Cursor position to restore after a paragraph type change.
+    /// Set in `willProcessEditing` when type changes, cleared after restoration.
+    /// The position is where cursor SHOULD be after the edit completes.
+    var cursorRestorePosition: Int?
+
     // MARK: - Initialization
 
     /// Create a new empty document.
-    init() {
+    override init() {
         self.id = UUID()
         self.textStorage = NSTextStorage()
         self.contentStorage = NSTextContentStorage()
         self.contentStorage.textStorage = textStorage
         self.undoManager = UndoManager()
+        super.init()
+        self.textStorage.delegate = self
     }
 
     /// Load document from file.
@@ -92,6 +104,8 @@ final class DocumentModel {
         self.contentStorage.textStorage = textStorage
         self.undoManager = UndoManager()
         self.pendingContent = content
+        super.init()
+        self.textStorage.delegate = self
     }
 
     /// Apply pending content after layout manager is connected.
@@ -180,5 +194,86 @@ final class DocumentModel {
 
         let nsRange = NSRange(location: start, length: end - start)
         return storage.attributedSubstring(from: nsRange).string
+    }
+
+    // MARK: - NSTextStorageDelegate
+
+    /// Apply heading fonts BEFORE TextKit 2 creates layout fragments.
+    /// This ensures fragments are created with correct line height metrics.
+    ///
+    /// Strategy:
+    /// - If paragraph TYPE changes (body↔heading), apply font to whole paragraph
+    /// - If type stays same, only apply to edited range (avoids cursor jump)
+    func textStorage(
+        _ textStorage: NSTextStorage,
+        willProcessEditing editedMask: NSTextStorageEditActions,
+        range editedRange: NSRange,
+        changeInLength delta: Int
+    ) {
+        // Only process if characters changed (not just attributes)
+        guard editedMask.contains(.editedCharacters) else { return }
+
+        let text = textStorage.string
+        guard !text.isEmpty else { return }
+
+        let theme = SyntaxTheme.default
+
+        // Get the paragraph range to determine what type of line this is
+        let paragraphRange = (text as NSString).paragraphRange(for: editedRange)
+        guard paragraphRange.length > 0 else { return }
+
+        // Get paragraph text (without trailing newline for parsing)
+        let paragraphText = (text as NSString).substring(with: paragraphRange)
+        let trimmedText = paragraphText.trimmingCharacters(in: .newlines)
+
+        // Parse to determine current paragraph type
+        let tokens = MarkdownParser.shared.parse(trimmedText)
+        let currentHeadingLevel = tokens.compactMap { token -> Int? in
+            if case .heading(let level) = token.element { return level }
+            return nil
+        }.first
+
+        // Determine target font based on current paragraph type
+        let targetFont: NSFont
+        if let level = currentHeadingLevel {
+            targetFont = theme.headingFonts[level] ?? theme.bodyFont
+        } else {
+            targetFont = theme.bodyFont
+        }
+
+        // Detect previous paragraph type by checking existing font at paragraph start
+        let existingFont = textStorage.attribute(.font, at: paragraphRange.location, effectiveRange: nil) as? NSFont
+        let previousHeadingLevel: Int? = {
+            guard let font = existingFont else { return nil }
+            for (level, headingFont) in theme.headingFonts {
+                if font == headingFont { return level }
+            }
+            return nil  // Was body text (or unknown font)
+        }()
+
+        // Check if paragraph TYPE changed
+        let typeChanged = currentHeadingLevel != previousHeadingLevel
+
+        if typeChanged {
+            // Type changed: apply font to entire paragraph (excluding trailing newline)
+            var attributeRange = paragraphRange
+            if paragraphText.hasSuffix("\n") {
+                attributeRange.length -= 1
+            }
+            guard attributeRange.length > 0 else { return }
+            textStorage.addAttribute(.font, value: targetFont, range: attributeRange)
+
+            // Remember where cursor SHOULD be after edit completes
+            // (addAttribute moves cursor to end of range, so we need to restore it)
+            cursorRestorePosition = editedRange.location + editedRange.length
+        } else {
+            // Type unchanged: only apply to edited range (avoids cursor jump)
+            guard editedRange.length > 0, editedRange.location < textStorage.length else { return }
+            let safeRange = NSRange(
+                location: editedRange.location,
+                length: min(editedRange.length, textStorage.length - editedRange.location)
+            )
+            textStorage.addAttribute(.font, value: targetFont, range: safeRange)
+        }
     }
 }

@@ -3,7 +3,7 @@ import AppKit
 /// View for a single tab in the tab bar.
 ///
 /// Shows title, dirty indicator, and close button.
-final class TabView: NSView {
+final class TabView: NSView, NSGestureRecognizerDelegate {
 
     /// Tab info for display.
     var tabInfo: TabInfo? {
@@ -89,6 +89,7 @@ final class TabView: NSView {
 
         // Click gesture for activation
         let click = NSClickGestureRecognizer(target: self, action: #selector(tabClicked))
+        click.delegate = self
         addGestureRecognizer(click)
 
         updateAppearance()
@@ -113,6 +114,17 @@ final class TabView: NSView {
 
     @objc private func closeButtonClicked() {
         onClose?()
+    }
+
+    // MARK: - NSGestureRecognizerDelegate
+
+    func gestureRecognizer(
+        _ gestureRecognizer: NSGestureRecognizer,
+        shouldAttemptToRecognizeWith event: NSEvent
+    ) -> Bool {
+        // Don't let the tab click gesture intercept clicks on the close button
+        let locationInView = convert(event.locationInWindow, from: nil)
+        return !closeButton.frame.contains(locationInView)
     }
 
     // MARK: - Layout
