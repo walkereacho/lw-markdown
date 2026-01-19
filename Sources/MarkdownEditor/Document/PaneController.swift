@@ -45,6 +45,9 @@ final class PaneController: NSObject {
     /// Reentrancy guard for heading font application.
     private var isApplyingHeadingFonts = false
 
+    /// Guard to prevent block context updates during display-only invalidations.
+    private var isInvalidatingDisplay = false
+
     // MARK: - Initialization
 
     init(document: DocumentModel, frame: NSRect) {
@@ -109,9 +112,13 @@ final class PaneController: NSObject {
     }
 
     /// Update block context incrementally from the edited paragraph. O(K).
+    /// Compares old vs new context and invalidates paragraphs whose code-block status changed.
     private func updateBlockContext() {
         guard let text = textView.textStorage?.string else { return }
         let paragraphs = text.components(separatedBy: "\n")
+
+        // Capture old block context before updating
+        let oldBlockContext = layoutDelegate.blockContext
 
         // Get the edited paragraph index from cursor position
         guard let location = cursorTextLocation,
@@ -121,7 +128,21 @@ final class PaneController: NSObject {
             return
         }
 
+        // Update block context
         layoutDelegate.updateBlockContextIncremental(afterEditAt: editedIndex, paragraphs: paragraphs)
+
+        // Find paragraphs whose code-block status changed
+        let newBlockContext = layoutDelegate.blockContext
+        var affectedParagraphs = newBlockContext.paragraphsWithChangedCodeBlockStatus(
+            comparedTo: oldBlockContext,
+            paragraphCount: paragraphs.count
+        )
+
+        // Exclude the edited paragraph (TextKit 2 already handles it)
+        affectedParagraphs.remove(editedIndex)
+
+        // Invalidate affected paragraphs to force fragment recreation
+        invalidateParagraphsDisplay(affectedParagraphs)
     }
 
     /// Update block context by scanning all paragraphs. O(N) - for initialization only.
@@ -216,6 +237,30 @@ final class PaneController: NSObject {
         return index == activeParagraphIndex
     }
 
+    // MARK: - Code Block Info (queried at draw time)
+
+    /// Get code block info for a paragraph at draw time.
+    /// Returns nil if paragraph is not part of a fenced code block.
+    func codeBlockInfo(at paragraphIndex: Int) -> MarkdownLayoutFragment.CodeBlockInfo? {
+        let blockContext = layoutDelegate.blockContext
+
+        let (isInside, language) = blockContext.isInsideFencedCodeBlock(paragraphIndex: paragraphIndex)
+        if isInside {
+            return .content(language: language)
+        }
+
+        let (isOpening, openingLanguage) = blockContext.isOpeningFence(paragraphIndex: paragraphIndex)
+        if isOpening {
+            return .openingFence(language: openingLanguage)
+        }
+
+        if blockContext.isClosingFence(paragraphIndex: paragraphIndex) {
+            return .closingFence
+        }
+
+        return nil
+    }
+
     /// Get current cursor location.
     var cursorTextLocation: NSTextLocation? {
         guard let selection = layoutManager.textSelections.first,
@@ -269,8 +314,33 @@ final class PaneController: NSObject {
 
         // Trigger layout invalidation by notifying the content storage of a "change"
         // This is a zero-length edit that forces re-layout without modifying content
+        isInvalidatingDisplay = true
+        defer { isInvalidatingDisplay = false }
         contentStorage.performEditingTransaction {
             contentStorage.textStorage?.edited(.editedAttributes, range: nsRange, changeInLength: 0)
+        }
+    }
+
+    /// Invalidate layout for multiple paragraphs to force fragment recreation.
+    /// Used when code block boundaries change and multiple paragraphs need refreshing.
+    private func invalidateParagraphsDisplay(_ indices: Set<Int>) {
+        guard !indices.isEmpty,
+              let document = document else { return }
+
+        let contentStorage = document.contentStorage
+
+        isInvalidatingDisplay = true
+        defer { isInvalidatingDisplay = false }
+        contentStorage.performEditingTransaction {
+            for index in indices {
+                guard let range = document.paragraphRange(at: index) else { continue }
+
+                let startOffset = contentStorage.offset(from: contentStorage.documentRange.location, to: range.location)
+                let endOffset = contentStorage.offset(from: contentStorage.documentRange.location, to: range.endLocation)
+                let nsRange = NSRange(location: startOffset, length: endOffset - startOffset)
+
+                contentStorage.textStorage?.edited(.editedAttributes, range: nsRange, changeInLength: 0)
+            }
         }
     }
 
@@ -285,6 +355,9 @@ extension PaneController: NSTextViewDelegate {
     }
 
     func textDidChange(_ notification: Notification) {
+        // Skip if this is just a display invalidation, not an actual text change
+        guard !isInvalidatingDisplay else { return }
+
         // Notify document of content change for cache invalidation
         let range = document?.contentStorage.documentRange ?? layoutManager.documentRange
         document?.contentDidChange(in: range, changeInLength: 0)

@@ -37,12 +37,15 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     /// Theme for visual styling.
     let theme: SyntaxTheme
 
-    /// Code block information (nil if not part of a fenced code block).
-    let codeBlockInfo: CodeBlockInfo?
-
     /// Check if this paragraph is currently active (at draw time, not creation time).
     private var isActiveParagraph: Bool {
         paneController?.isActiveParagraph(at: paragraphIndex) ?? false
+    }
+
+    /// Code block information queried at draw time (not creation time).
+    /// This allows code block status to update when fences are added/removed.
+    private var codeBlockInfo: CodeBlockInfo? {
+        paneController?.codeBlockInfo(at: paragraphIndex)
     }
 
     // MARK: - Initialization
@@ -53,14 +56,12 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         tokens: [MarkdownToken],
         paragraphIndex: Int,
         paneController: PaneController?,
-        theme: SyntaxTheme,
-        codeBlockInfo: CodeBlockInfo? = nil
+        theme: SyntaxTheme
     ) {
         self.tokens = tokens
         self.paragraphIndex = paragraphIndex
         self.paneController = paneController
         self.theme = theme
-        self.codeBlockInfo = codeBlockInfo
         super.init(textElement: textElement, range: range)
     }
 

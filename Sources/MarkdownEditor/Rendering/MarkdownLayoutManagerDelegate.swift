@@ -62,32 +62,16 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
         let rawText = paragraph.attributedString.string
         let text = rawText.trimmingCharacters(in: .newlines)
 
-        // Check if this paragraph is part of a fenced code block
-        let (isInsideCodeBlock, language) = blockContext.isInsideFencedCodeBlock(paragraphIndex: paragraphIndex)
-        let (isOpening, openingLanguage) = blockContext.isOpeningFence(paragraphIndex: paragraphIndex)
-        let isClosing = blockContext.isClosingFence(paragraphIndex: paragraphIndex)
-
-        // Determine code block info for this paragraph
-        var codeBlockInfo: MarkdownLayoutFragment.CodeBlockInfo? = nil
-        if isInsideCodeBlock {
-            codeBlockInfo = .content(language: language)
-        } else if isOpening {
-            codeBlockInfo = .openingFence(language: openingLanguage)
-        } else if isClosing {
-            codeBlockInfo = .closingFence
-        }
-
         let tokens = tokenProvider.parse(text)
 
-        // Return custom fragment (checks active state at draw time, not creation time)
+        // Return custom fragment (checks active state and code block info at draw time, not creation time)
         return MarkdownLayoutFragment(
             textElement: paragraph,
             range: paragraph.elementRange,
             tokens: tokens,
             paragraphIndex: paragraphIndex,
             paneController: pane,
-            theme: theme,
-            codeBlockInfo: codeBlockInfo
+            theme: theme
         )
     }
 }

@@ -21,7 +21,8 @@ final class BlockContextScanner {
                     context.fencedCodeBlocks.append((
                         start: open.index,
                         end: i,
-                        language: open.language
+                        language: open.language,
+                        isClosed: true
                     ))
                     openFence = nil
                 } else {
@@ -39,7 +40,8 @@ final class BlockContextScanner {
             context.fencedCodeBlocks.append((
                 start: open.index,
                 end: paragraphs.count - 1,
-                language: open.language
+                language: open.language,
+                isClosed: false
             ))
         }
 
@@ -53,7 +55,20 @@ final class BlockContextScanner {
         afterEditAt paragraphIndex: Int,
         paragraphs: [String]
     ) {
-        // Remove blocks that start at or after the edit point
+        // Find the minimum start of blocks that will be removed
+        // (blocks ending at or after edit point that start before it)
+        var rescanFrom: Int? = nil
+        for block in context.fencedCodeBlocks {
+            if block.end >= paragraphIndex && block.start < paragraphIndex {
+                // This block will be removed but starts before edit point
+                // We need to rescan from its start to find the opening fence
+                if rescanFrom == nil || block.start < rescanFrom! {
+                    rescanFrom = block.start
+                }
+            }
+        }
+
+        // Remove blocks that start at or after the edit point, or end at or after it
         context.fencedCodeBlocks.removeAll { block in
             block.start >= paragraphIndex || block.end >= paragraphIndex
         }
@@ -72,7 +87,8 @@ final class BlockContextScanner {
         }
 
         let startIndex = context.fencedCodeBlocks.last.map { $0.end + 1 } ?? 0
-        let scanStart = max(startIndex, paragraphIndex > 0 ? paragraphIndex - 1 : 0)
+        // Use rescanFrom if we removed a block that started before edit point
+        let scanStart = rescanFrom ?? max(startIndex, paragraphIndex > 0 ? paragraphIndex - 1 : 0)
 
         for i in scanStart..<paragraphs.count {
             let text = paragraphs[i]
@@ -83,7 +99,8 @@ final class BlockContextScanner {
                     context.fencedCodeBlocks.append((
                         start: open.index,
                         end: i,
-                        language: open.language
+                        language: open.language,
+                        isClosed: true
                     ))
                     openFence = nil
                 } else {
@@ -99,7 +116,8 @@ final class BlockContextScanner {
             context.fencedCodeBlocks.append((
                 start: open.index,
                 end: paragraphs.count - 1,
-                language: open.language
+                language: open.language,
+                isClosed: false
             ))
         }
 
