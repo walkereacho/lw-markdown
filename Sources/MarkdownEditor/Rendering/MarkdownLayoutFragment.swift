@@ -789,8 +789,8 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
     // MARK: - Raw Markdown Drawing (Active Paragraph)
 
-    /// Draw with all syntax characters visible but muted.
-    /// Headings still render at heading size for visual consistency.
+    /// Draw with all syntax characters visible but muted, and inline formatting applied.
+    /// Shows live formatting preview while keeping syntax visible.
     private func drawRawMarkdown(text: String, at point: CGPoint, in context: CGContext) {
         // Check if this is a heading line
         let headingToken = tokens.first { token in
@@ -811,17 +811,31 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             attributes: baseAttributes
         )
 
-        // Apply muted color to syntax characters (keeping heading font size)
+        // Apply inline formatting to content ranges (bold, italic, etc.)
+        for token in tokens {
+            // Skip block-level elements - they're handled by base attributes
+            switch token.element {
+            case .heading, .blockquote, .unorderedListItem, .orderedListItem,
+                 .fencedCodeBlock, .indentedCodeBlock, .horizontalRule, .text:
+                continue
+            default:
+                break
+            }
+
+            // Apply formatting to content range
+            guard token.contentRange.upperBound <= text.count else { continue }
+            let contentNSRange = NSRange(location: token.contentRange.lowerBound, length: token.contentRange.count)
+            let formatAttrs = attributesForElement(token.element)
+            attributedString.addAttributes(formatAttrs, range: contentNSRange)
+        }
+
+        // Apply muted color to syntax characters (keeping their current font)
         for token in tokens {
             for syntaxRange in token.syntaxRanges {
                 guard syntaxRange.upperBound <= text.count else { continue }
                 let nsRange = NSRange(location: syntaxRange.lowerBound, length: syntaxRange.count)
-                // Merge syntax styling with current font
-                var syntaxAttrs = theme.syntaxCharacterAttributes
-                if let font = baseAttributes[.font] as? NSFont {
-                    syntaxAttrs[.font] = font
-                }
-                attributedString.addAttributes(syntaxAttrs, range: nsRange)
+                // Only change color, keep the font to match storage metrics
+                attributedString.addAttribute(.foregroundColor, value: theme.syntaxCharacterColor, range: nsRange)
             }
         }
 
