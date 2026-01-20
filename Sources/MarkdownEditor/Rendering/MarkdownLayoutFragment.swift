@@ -1332,28 +1332,31 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     }
 
     private func attributesForElement(_ element: MarkdownElement) -> [NSAttributedString.Key: Any] {
+        // For inline elements, use theme's canonical font resolution
+        if let font = theme.fontForInlineElement(element) {
+            var attrs = theme.bodyAttributes
+            attrs[.font] = font
+            // Add element-specific non-font attributes
+            switch element {
+            case .link:
+                attrs[.foregroundColor] = theme.linkColor
+                attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            default:
+                break
+            }
+            return attrs
+        }
+
+        // Non-inline elements use their dedicated attribute dictionaries
         switch element {
         case .heading(let level):
             return theme.headingAttributes(level: level)
-        case .bold:
-            return theme.boldAttributes
-        case .italic:
-            return theme.italicAttributes
-        case .boldItalic:
-            return theme.boldItalicAttributes
-        case .inlineCode:
-            return theme.inlineCodeAttributes
-        case .link:
-            return theme.linkAttributes
         case .fencedCodeBlock, .indentedCodeBlock:
             return theme.codeBlockAttributes
         case .blockquote:
             return theme.blockquoteAttributes
-        case .unorderedListItem, .orderedListItem:
-            return theme.bodyAttributes
-        case .horizontalRule:
-            return theme.bodyAttributes
-        case .text:
+        default:
+            // unorderedListItem, orderedListItem, horizontalRule, text
             return theme.bodyAttributes
         }
     }

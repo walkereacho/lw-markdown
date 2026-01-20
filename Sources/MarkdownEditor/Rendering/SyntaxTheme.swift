@@ -82,6 +82,51 @@ struct SyntaxTheme {
         [.font: headingFonts[level] ?? bodyFont, .foregroundColor: headingColor]
     }
 
+    // MARK: - Font Resolution
+
+    /// Resolve font for inline element content (bold, italic, code, etc.).
+    /// Returns nil for non-inline elements (headings, blockquotes, lists).
+    func fontForInlineElement(_ element: MarkdownElement) -> NSFont? {
+        switch element {
+        case .bold:
+            return boldFont
+        case .italic:
+            return italicFont
+        case .boldItalic:
+            return boldItalicFont
+        case .inlineCode:
+            return codeFont
+        case .link:
+            return bodyFont  // Links use body font, just different color
+        default:
+            return nil  // Non-inline elements
+        }
+    }
+
+    /// Apply inline formatting fonts to text storage for cursor accuracy.
+    /// This ensures TextKit 2's layout calculation matches our rendering.
+    ///
+    /// - Parameters:
+    ///   - textStorage: The text storage to modify
+    ///   - tokens: Parsed tokens for the paragraph
+    ///   - paragraphOffset: Character offset of paragraph start in storage
+    func applyInlineFormattingFonts(
+        to textStorage: NSTextStorage,
+        tokens: [MarkdownToken],
+        paragraphOffset: Int
+    ) {
+        for token in tokens {
+            guard let font = fontForInlineElement(token.element) else { continue }
+
+            let start = paragraphOffset + token.contentRange.lowerBound
+            let length = token.contentRange.count
+
+            guard start >= 0, start + length <= textStorage.length else { continue }
+
+            textStorage.addAttribute(.font, value: font, range: NSRange(location: start, length: length))
+        }
+    }
+
     // MARK: - Default Theme
 
     static let `default`: SyntaxTheme = {

@@ -259,32 +259,7 @@ final class PaneController: NSObject {
 
                 // Apply inline formatting fonts for cursor accuracy (body paragraphs and lists)
                 if !isBlockElement {
-                    for token in tokens {
-                        let font: NSFont?
-                        switch token.element {
-                        case .bold:
-                            font = theme.boldFont
-                        case .italic:
-                            font = theme.italicFont
-                        case .boldItalic:
-                            font = theme.boldItalicFont
-                        case .inlineCode:
-                            font = theme.codeFont
-                        default:
-                            continue
-                        }
-
-                        guard let targetFont = font else { continue }
-
-                        // Apply font to content range within this paragraph
-                        let contentStart = offset + token.contentRange.lowerBound
-                        let contentLength = token.contentRange.count
-
-                        guard contentStart >= 0, contentStart + contentLength <= textStorage.length else { continue }
-
-                        let contentNSRange = NSRange(location: contentStart, length: contentLength)
-                        textStorage.addAttribute(.font, value: targetFont, range: contentNSRange)
-                    }
+                    theme.applyInlineFormattingFonts(to: textStorage, tokens: tokens, paragraphOffset: offset)
                 }
             }
 

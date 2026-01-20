@@ -322,40 +322,7 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         // For body paragraphs, also apply inline formatting fonts for cursor accuracy
         // This ensures TextKit 2's layout matches our rendering
         if currentType == .body {
-            applyInlineFormattingFonts(tokens: tokens, paragraphStart: paragraphRange.location, to: textStorage, theme: theme)
-        }
-    }
-
-    /// Apply inline formatting fonts to storage for cursor accuracy.
-    /// This ensures TextKit 2's layout calculation matches our rendering.
-    private func applyInlineFormattingFonts(tokens: [MarkdownToken], paragraphStart: Int, to textStorage: NSTextStorage, theme: SyntaxTheme) {
-        for token in tokens {
-            let font: NSFont?
-            switch token.element {
-            case .bold:
-                font = theme.boldFont
-            case .italic:
-                font = theme.italicFont
-            case .boldItalic:
-                font = theme.boldItalicFont
-            case .inlineCode:
-                font = theme.codeFont
-            case .link:
-                font = theme.bodyFont  // Links use body font, just different color
-            default:
-                continue
-            }
-
-            guard let targetFont = font else { continue }
-
-            // Apply font to content range (not syntax range)
-            let contentStart = paragraphStart + token.contentRange.lowerBound
-            let contentLength = token.contentRange.count
-
-            guard contentStart >= 0, contentStart + contentLength <= textStorage.length else { continue }
-
-            let contentNSRange = NSRange(location: contentStart, length: contentLength)
-            textStorage.addAttribute(.font, value: targetFont, range: contentNSRange)
+            theme.applyInlineFormattingFonts(to: textStorage, tokens: tokens, paragraphOffset: paragraphRange.location)
         }
     }
 
