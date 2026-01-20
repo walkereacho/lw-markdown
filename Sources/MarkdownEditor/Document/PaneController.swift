@@ -93,13 +93,13 @@ final class PaneController: NSObject {
     }
 
     /// Initialize rendering state after content is loaded.
-    /// Sets up heading fonts and active paragraph for correct initial display.
+    /// Sets up fonts and active paragraph for correct initial display.
     private func initializeAfterContentLoad() {
-        // Apply heading fonts so TextKit 2 calculates correct metrics (O(N) on load only)
-        applyHeadingFontsToAllParagraphs()
-
-        // Update block context for fenced code blocks (O(N) on load only)
+        // Update block context FIRST so we know which paragraphs are code blocks
         updateBlockContextFull()
+
+        // Apply fonts for all paragraph types so TextKit 2 calculates correct metrics (O(N) on load only)
+        applyFontsToAllParagraphs()
 
         // Set initial active paragraph to 0 (cursor starts at beginning)
         activeParagraphIndex = 0
@@ -189,8 +189,9 @@ final class PaneController: NSObject {
 
     // MARK: - Font Attribute Styling
 
-    /// Apply heading fonts to ALL paragraphs. O(N) - only for initialization.
-    private func applyHeadingFontsToAllParagraphs() {
+    /// Apply fonts to ALL paragraphs based on their type. O(N) - only for initialization.
+    /// Handles headings, code blocks, blockquotes, and lists.
+    private func applyFontsToAllParagraphs() {
         guard !isApplyingHeadingFonts else { return }
         guard document != nil,
               let textStorage = textView.textStorage else { return }
@@ -202,6 +203,7 @@ final class PaneController: NSObject {
         guard !text.isEmpty else { return }
 
         let theme = SyntaxTheme.default
+        let blockContext = layoutDelegate.blockContext
 
         textStorage.beginEditing()
 
@@ -209,21 +211,53 @@ final class PaneController: NSObject {
         let fullRange = NSRange(location: 0, length: textStorage.length)
         textStorage.addAttribute(.font, value: theme.bodyFont, range: fullRange)
 
-        // Apply heading fonts
+        // Apply fonts based on paragraph type
         let paragraphs = text.components(separatedBy: "\n")
         var offset = 0
 
-        for para in paragraphs {
-            let tokens = layoutDelegate.tokenProvider.parse(para)
-            for token in tokens {
-                if case .heading(let level) = token.element {
-                    let font = theme.headingFonts[level] ?? theme.bodyFont
-                    let range = NSRange(location: offset, length: para.count)
-                    if range.location + range.length <= textStorage.length {
+        for (index, para) in paragraphs.enumerated() {
+            let range = NSRange(location: offset, length: para.count)
+            guard range.location + range.length <= textStorage.length else {
+                offset += para.count + 1
+                continue
+            }
+
+            // Check if this paragraph is part of a code block
+            let isCodeBlockContent = blockContext.isInsideFencedCodeBlock(paragraphIndex: index).0
+            let isOpeningFence = blockContext.isOpeningFence(paragraphIndex: index).0
+            let isClosingFence = blockContext.isClosingFence(paragraphIndex: index)
+
+            if isCodeBlockContent || isOpeningFence || isClosingFence {
+                // Code block: apply monospace font
+                textStorage.addAttribute(.font, value: theme.codeFont, range: range)
+            } else {
+                // Parse for other block-level elements
+                let tokens = layoutDelegate.tokenProvider.parse(para)
+
+                var fontApplied = false
+                for token in tokens {
+                    switch token.element {
+                    case .heading(let level):
+                        let font = theme.headingFonts[level] ?? theme.bodyFont
                         textStorage.addAttribute(.font, value: font, range: range)
+                        fontApplied = true
+
+                    case .blockquote:
+                        textStorage.addAttribute(.font, value: theme.italicFont, range: range)
+                        fontApplied = true
+
+                    case .unorderedListItem, .orderedListItem:
+                        // Lists use body font (already set), no change needed
+                        fontApplied = true
+
+                    default:
+                        break
                     }
+
+                    if fontApplied { break }
                 }
             }
+
             offset += para.count + 1
         }
 

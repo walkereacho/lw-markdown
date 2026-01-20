@@ -734,23 +734,21 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     }
 
     /// Draw code block content (lines between fences).
-    /// Active: plain monospace text. Inactive: syntax-highlighted text.
+    /// Always renders the same regardless of active/inactive state - only fence lines change.
     private func drawCodeBlockContent(text: String, language: String?, at point: CGPoint, in context: CGContext) {
         // Content lines use full fragment height for continuous backgrounds
         drawCodeBlockBackground(at: point, in: context, useFullHeight: true)
 
-        // Active paragraph: show plain monospace (raw code)
-        if isActiveParagraph {
-            let attrString = NSAttributedString(string: text, attributes: theme.codeBlockAttributes)
-            drawAttributedString(attrString, at: point, in: context)
-            return
-        }
-
-        // Inactive paragraph: apply syntax highlighting
+        // Always apply syntax highlighting (or fallback to plain monospace)
+        // Code block content should look consistent regardless of cursor position
         if let highlighted = SyntaxHighlighter.shared.highlight(code: text, language: language) {
-            drawAttributedString(highlighted, at: point, in: context)
+            // IMPORTANT: Replace Highlightr's font with our codeFont to match storage metrics
+            // This ensures cursor positioning is correct while keeping syntax colors
+            let mutableHighlighted = NSMutableAttributedString(attributedString: highlighted)
+            mutableHighlighted.addAttribute(.font, value: theme.codeFont, range: NSRange(location: 0, length: mutableHighlighted.length))
+            drawAttributedString(mutableHighlighted, at: point, in: context)
         } else {
-            // Fallback to plain monospace if highlighting fails
+            // Fallback to plain monospace if highlighting fails or no language specified
             let attrString = NSAttributedString(string: text, attributes: theme.codeBlockAttributes)
             drawAttributedString(attrString, at: point, in: context)
         }
