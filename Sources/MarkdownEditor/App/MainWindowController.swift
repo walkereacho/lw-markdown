@@ -20,10 +20,17 @@ final class MainWindowController: NSWindowController {
     /// Editor view controller.
     private(set) var editorViewController: EditorViewController!
 
+    /// Quick open controller.
+    private var quickOpenController: QuickOpenController?
+
+    /// Theme observer.
+    private var themeObserver: NSObjectProtocol?
+
     override init(window: NSWindow?) {
         super.init(window: nil)
         setupWindow()
         setupTabManager()
+        setupQuickOpen()
     }
 
     required init?(coder: NSCoder) {
@@ -33,7 +40,7 @@ final class MainWindowController: NSWindowController {
     private func setupWindow() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 700),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -41,11 +48,19 @@ final class MainWindowController: NSWindowController {
         window.center()
         window.minSize = NSSize(width: 600, height: 400)
 
+        // Transparent titlebar for modern look
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+
+        // Window background from theme
+        window.backgroundColor = ThemeManager.shared.colors.shellBackground
+
         // Main split view (sidebar | editor area)
         let split = NSSplitView()
         split.isVertical = true
         split.dividerStyle = .thin
         split.autoresizingMask = [.width, .height]
+        split.wantsLayer = true
         self.splitView = split
 
         // Sidebar
@@ -66,10 +81,9 @@ final class MainWindowController: NSWindowController {
         split.addArrangedSubview(sidebarView)
 
         // Editor area (tab bar + editor)
-        // Note: Don't set translatesAutoresizingMaskIntoConstraints = false here
-        // because NSSplitView manages subview frames directly, not via Auto Layout
         let editorArea = NSView()
         editorArea.autoresizingMask = [.width, .height]
+        editorArea.wantsLayer = true
 
         // Tab bar
         let tabBar = TabBarView()
@@ -88,7 +102,7 @@ final class MainWindowController: NSWindowController {
             tabBar.topAnchor.constraint(equalTo: editorArea.topAnchor),
             tabBar.leadingAnchor.constraint(equalTo: editorArea.leadingAnchor),
             tabBar.trailingAnchor.constraint(equalTo: editorArea.trailingAnchor),
-            tabBar.heightAnchor.constraint(equalToConstant: 32),
+            tabBar.heightAnchor.constraint(equalToConstant: 36),
 
             editorView.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
             editorView.leadingAnchor.constraint(equalTo: editorArea.leadingAnchor),
@@ -105,6 +119,19 @@ final class MainWindowController: NSWindowController {
 
         window.contentView = split
         self.window = window
+
+        // Observe theme changes for window background
+        themeObserver = ThemeManager.shared.observeChanges { [weak self] in
+            self?.applyTheme()
+        }
+    }
+
+    private func applyTheme() {
+        let colors = ThemeManager.shared.colors
+        window?.backgroundColor = colors.shellBackground
+
+        // Update split view divider
+        splitView?.setValue(colors.shellDivider, forKey: "dividerColor")
     }
 
     private func setupTabManager() {
@@ -126,6 +153,20 @@ final class MainWindowController: NSWindowController {
 
         // Create initial empty document so tabs are never empty
         newDocument()
+    }
+
+    private func setupQuickOpen() {
+        quickOpenController = QuickOpenController()
+        quickOpenController?.workspaceManager = workspaceManager
+        quickOpenController?.onFileSelected = { [weak self] url in
+            try? self?.openFile(at: url)
+        }
+    }
+
+    // MARK: - Quick Open
+
+    func showQuickOpen() {
+        quickOpenController?.showWindow(nil)
     }
 
     // MARK: - Document Operations

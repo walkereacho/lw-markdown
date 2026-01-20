@@ -3,6 +3,7 @@ import AppKit
 /// View containing all tabs in a horizontal bar.
 ///
 /// Uses NSStackView for horizontal layout of tabs.
+/// Supports theming via ThemeManager.
 final class TabBarView: NSView {
 
     /// Tab manager providing tab state.
@@ -18,8 +19,14 @@ final class TabBarView: NSView {
     /// Stack view containing tabs.
     private var stackView: NSStackView!
 
+    /// Bottom border layer for depth.
+    private var borderLayer: CALayer!
+
     /// Tab views keyed by document ID.
     private var tabViews: [UUID: TabView] = [:]
+
+    /// Theme observer token.
+    private var themeObserver: NSObjectProtocol?
 
     // MARK: - Initialization
 
@@ -35,7 +42,11 @@ final class TabBarView: NSView {
 
     private func setupViews() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        // Bottom border for depth
+        borderLayer = CALayer()
+        borderLayer.zPosition = 1
+        layer?.addSublayer(borderLayer)
 
         stackView = NSStackView()
         stackView.translatesAutoresizingMaskIntoConstraints = false
@@ -43,6 +54,7 @@ final class TabBarView: NSView {
         stackView.spacing = 1
         stackView.alignment = .centerY
         stackView.distribution = .fill
+        stackView.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
         addSubview(stackView)
 
         NSLayoutConstraint.activate([
@@ -51,6 +63,44 @@ final class TabBarView: NSView {
             stackView.topAnchor.constraint(equalTo: topAnchor),
             stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
+    }
+
+    // MARK: - Lifecycle
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        themeObserver = observeTheme { [weak self] in
+            self?.applyTheme()
+        }
+    }
+
+    // MARK: - Theming
+
+    private func applyTheme() {
+        let colors = ThemeManager.shared.colors
+        layer?.backgroundColor = colors.tabBarBackground.cgColor
+        borderLayer.backgroundColor = colors.shellBorder.cgColor
+
+        // Update existing tabs
+        for tabView in tabViews.values {
+            tabView.applyTheme()
+        }
+    }
+
+    // MARK: - Layout
+
+    override func layout() {
+        super.layout()
+        // Position border at bottom
+        borderLayer.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 1)
+    }
+
+    override var wantsUpdateLayer: Bool {
+        return true
+    }
+
+    override func updateLayer() {
+        applyTheme()
     }
 
     // MARK: - Tab Management
@@ -103,9 +153,9 @@ final class TabBarView: NSView {
         }
     }
 
-    // MARK: - Layout
+    // MARK: - Intrinsic Size
 
     override var intrinsicContentSize: NSSize {
-        return NSSize(width: NSView.noIntrinsicMetric, height: 32)
+        return NSSize(width: NSView.noIntrinsicMetric, height: 36)
     }
 }
