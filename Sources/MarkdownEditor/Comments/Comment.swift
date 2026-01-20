@@ -45,18 +45,23 @@ struct CommentStore: Codable {
         return documentText.range(of: comment.anchorText)
     }
 
-    /// Get unresolved comments sorted by position in document.
+    /// Get unresolved comments sorted by position in document (top to bottom).
     func unresolvedComments(sortedBy documentText: String) -> [Comment] {
         return comments
             .filter { !$0.isResolved }
             .sorted { lhs, rhs in
                 let lhsRange = findAnchorRange(for: lhs, in: documentText)
                 let rhsRange = findAnchorRange(for: rhs, in: documentText)
-                guard let lhsStart = lhsRange?.lowerBound,
-                      let rhsStart = rhsRange?.lowerBound else {
-                    return false
+                switch (lhsRange?.lowerBound, rhsRange?.lowerBound) {
+                case let (lhsStart?, rhsStart?):
+                    return lhsStart < rhsStart
+                case (_?, nil):
+                    return true  // lhs found, rhs not - lhs comes first
+                case (nil, _?):
+                    return false // rhs found, lhs not - rhs comes first
+                case (nil, nil):
+                    return lhs.createdAt < rhs.createdAt  // neither found, sort by creation
                 }
-                return lhsStart < rhsStart
             }
     }
 

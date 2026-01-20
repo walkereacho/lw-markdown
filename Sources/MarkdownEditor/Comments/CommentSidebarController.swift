@@ -16,7 +16,7 @@ final class CommentSidebarController: NSViewController {
     private var resolvedDisclosure: NSButton!
     private var resolvedStack: NSStackView!
     private var borderView: NSView!
-    private var inputField: NSTextField?
+    private var inputTextView: NSTextView?
     private var pendingAnchorText: String?
     private var isResolvedExpanded = false
     private var themeObserver: NSObjectProtocol?
@@ -235,31 +235,57 @@ final class CommentSidebarController: NSViewController {
         inputCard.layer?.borderWidth = 1
         inputCard.layer?.borderColor = colors.accentPrimary.cgColor
 
-        let anchorLabel = NSTextField(labelWithString: "\"\(anchorText.prefix(30))\"")
+        let firstLine = anchorText.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? anchorText
+        let truncated = String(firstLine.prefix(30))
+        let needsEllipsis = firstLine.count > 30 || anchorText.contains("\n")
+        let anchorLabel = NSTextField(labelWithString: "\"\(truncated)\(needsEllipsis ? "..." : "")\"")
         anchorLabel.translatesAutoresizingMaskIntoConstraints = false
         anchorLabel.font = theme.uiFont(size: 11, weight: .medium)
         anchorLabel.textColor = colors.sidebarSecondaryText
         inputCard.addSubview(anchorLabel)
 
-        let input = NSTextField()
-        input.translatesAutoresizingMaskIntoConstraints = false
-        input.placeholderString = "Add your comment..."
+        // Scroll view for multi-line text input
+        let inputScroll = NSScrollView()
+        inputScroll.translatesAutoresizingMaskIntoConstraints = false
+        inputScroll.hasVerticalScroller = true
+        inputScroll.hasHorizontalScroller = false
+        inputScroll.autohidesScrollers = true
+        inputScroll.borderType = .noBorder
+        inputScroll.drawsBackground = false
+
+        let input = NSTextView()
+        input.isRichText = false
         input.font = theme.uiFont(size: 12, weight: .regular)
-        input.isBordered = false
-        input.focusRingType = .none
+        input.textColor = colors.sidebarText
         input.backgroundColor = .clear
+        input.isVerticallyResizable = true
+        input.isHorizontallyResizable = false
+        input.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        input.textContainer?.widthTracksTextView = true
         input.delegate = self
-        inputCard.addSubview(input)
-        self.inputField = input
+        inputScroll.documentView = input
+        inputCard.addSubview(inputScroll)
+        self.inputTextView = input
+
+        // Hint label
+        let hintLabel = NSTextField(labelWithString: "⌘+Enter to submit")
+        hintLabel.translatesAutoresizingMaskIntoConstraints = false
+        hintLabel.font = theme.uiFont(size: 10, weight: .regular)
+        hintLabel.textColor = colors.sidebarSecondaryText.withAlphaComponent(0.6)
+        inputCard.addSubview(hintLabel)
 
         NSLayoutConstraint.activate([
             anchorLabel.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 8),
             anchorLabel.topAnchor.constraint(equalTo: inputCard.topAnchor, constant: 8),
             anchorLabel.trailingAnchor.constraint(lessThanOrEqualTo: inputCard.trailingAnchor, constant: -8),
-            input.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 8),
-            input.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -8),
-            input.topAnchor.constraint(equalTo: anchorLabel.bottomAnchor, constant: 4),
-            input.bottomAnchor.constraint(equalTo: inputCard.bottomAnchor, constant: -8),
+            inputScroll.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 8),
+            inputScroll.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -8),
+            inputScroll.topAnchor.constraint(equalTo: anchorLabel.bottomAnchor, constant: 4),
+            inputScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
+            inputScroll.heightAnchor.constraint(lessThanOrEqualToConstant: 100),
+            hintLabel.topAnchor.constraint(equalTo: inputScroll.bottomAnchor, constant: 4),
+            hintLabel.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -8),
+            hintLabel.bottomAnchor.constraint(equalTo: inputCard.bottomAnchor, constant: -6),
         ])
 
         stackView.insertArrangedSubview(inputCard, at: 0)
@@ -268,21 +294,23 @@ final class CommentSidebarController: NSViewController {
     }
 
     private func finishAddingComment() {
-        guard let anchorText = pendingAnchorText, let content = inputField?.stringValue, !content.isEmpty else {
+        guard let anchorText = pendingAnchorText,
+              let content = inputTextView?.string.trimmingCharacters(in: .whitespacesAndNewlines),
+              !content.isEmpty else {
             cancelAddingComment()
             return
         }
         let comment = Comment(anchorText: anchorText, content: content)
         commentStore.comments.append(comment)
         pendingAnchorText = nil
-        inputField = nil
+        inputTextView = nil
         onCommentStoreChanged?(commentStore)
         rebuildCommentList()
     }
 
     private func cancelAddingComment() {
         pendingAnchorText = nil
-        inputField = nil
+        inputTextView = nil
         rebuildCommentList()
     }
 
@@ -327,12 +355,18 @@ final class CommentSidebarController: NSViewController {
     }
 }
 
-extension CommentSidebarController: NSTextFieldDelegate {
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+extension CommentSidebarController: NSTextViewDelegate {
+    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        // Cmd+Enter to submit
         if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-            finishAddingComment()
-            return true
+            if NSApp.currentEvent?.modifierFlags.contains(.command) == true {
+                finishAddingComment()
+                return true
+            }
+            // Allow regular Enter for newlines
+            return false
         }
+        // Escape to cancel
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
             cancelAddingComment()
             return true

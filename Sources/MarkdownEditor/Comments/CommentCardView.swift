@@ -75,8 +75,6 @@ final class CommentCardView: NSView {
             contentLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
         ])
 
-        let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(cardClicked))
-        addGestureRecognizer(clickGesture)
 
         let trackingArea = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self, userInfo: nil)
         addTrackingArea(trackingArea)
@@ -84,9 +82,12 @@ final class CommentCardView: NSView {
 
     func update(with comment: Comment) {
         self.comment = comment
-        let displayAnchor = comment.anchorText.prefix(30)
-        let suffix = comment.anchorText.count > 30 ? "..." : ""
-        anchorLabel.stringValue = "\"\(displayAnchor)\(suffix)\""
+        // Show only first line, truncated to 30 chars
+        let firstLine = comment.anchorText.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? comment.anchorText
+        let truncated = String(firstLine.prefix(30))
+        let needsEllipsis = firstLine.count > 30 || comment.anchorText.contains("\n")
+        let suffix = needsEllipsis ? "..." : ""
+        anchorLabel.stringValue = "\"\(truncated)\(suffix)\""
         contentLabel.stringValue = comment.content
         contentLabel.isHidden = comment.isCollapsed
         checkbox.state = comment.isResolved ? .on : .off
@@ -115,4 +116,15 @@ final class CommentCardView: NSView {
 
     override func mouseEntered(with event: NSEvent) { deleteButton.isHidden = false }
     override func mouseExited(with event: NSEvent) { deleteButton.isHidden = true }
+
+    override func mouseDown(with event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+        let hitView = hitTest(location)
+        // Only trigger card click if clicking on background, not on controls
+        if hitView === self || hitView === anchorLabel || hitView === contentLabel {
+            onClick?(comment.id)
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
 }
