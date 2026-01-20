@@ -231,24 +231,269 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             return
         }
 
-        // Non-heading/non-blockquote/non-list: check if we need custom drawing
-        // For plain text with no inline formatting, use super.draw() for proper wrapping
-        let hasInlineFormatting = tokens.contains { token in
+        // Non-heading/non-blockquote/non-list: draw with wrapping support
+        // Use TextKit 2's line fragments for line breaks, but apply our custom formatting
+        if isActiveParagraph {
+            drawRawMarkdownWrapped(text: text, at: point, in: context)
+        } else {
+            drawFormattedMarkdownWrapped(text: text, at: point, in: context)
+        }
+    }
+
+    // MARK: - Wrapped Text Drawing
+
+    /// Draw active paragraph with formatting and visible syntax, respecting TextKit 2's line wrapping.
+    private func drawRawMarkdownWrapped(text: String, at point: CGPoint, in context: CGContext) {
+        // For single-line or simple cases, use existing method
+        guard textLineFragments.count > 1 else {
+            drawRawMarkdown(text: text, at: point, in: context)
+            return
+        }
+
+        // Build the full attributed string with formatting
+        let baseAttributes = theme.bodyAttributes
+        let attributedString = NSMutableAttributedString(string: text, attributes: baseAttributes)
+
+        // Apply inline formatting to content ranges
+        for token in tokens {
             switch token.element {
-            case .bold, .italic, .boldItalic, .inlineCode, .link:
-                return true
+            case .heading, .blockquote, .unorderedListItem, .orderedListItem,
+                 .fencedCodeBlock, .indentedCodeBlock, .horizontalRule, .text:
+                continue
+            case .inlineCode:
+                guard token.contentRange.upperBound <= text.count else { continue }
+                let contentNSRange = NSRange(location: token.contentRange.lowerBound, length: token.contentRange.count)
+                attributedString.addAttribute(.font, value: theme.codeFont, range: contentNSRange)
+                continue
             default:
-                return false
+                break
+            }
+            guard token.contentRange.upperBound <= text.count else { continue }
+            let contentNSRange = NSRange(location: token.contentRange.lowerBound, length: token.contentRange.count)
+            let formatAttrs = attributesForElement(token.element)
+            attributedString.addAttributes(formatAttrs, range: contentNSRange)
+        }
+
+        // Apply muted color to syntax characters
+        for token in tokens {
+            for syntaxRange in token.syntaxRanges {
+                guard syntaxRange.upperBound <= text.count else { continue }
+                let nsRange = NSRange(location: syntaxRange.lowerBound, length: syntaxRange.count)
+                attributedString.addAttribute(.foregroundColor, value: theme.syntaxCharacterColor, range: nsRange)
             }
         }
 
-        if !hasInlineFormatting {
-            // Plain text - use TextKit 2's native drawing for proper wrapping
-            super.draw(at: point, in: context)
-        } else if isActiveParagraph {
-            drawRawMarkdown(text: text, at: point, in: context)
+        // Draw each line fragment at its correct position
+        drawLineFragments(attributedString: attributedString, at: point, in: context)
+    }
+
+    /// Draw inactive paragraph with formatting and hidden syntax, with text wrapping.
+    /// Since syntax is hidden, we calculate our own line breaks on the display text.
+    private func drawFormattedMarkdownWrapped(text: String, at point: CGPoint, in context: CGContext) {
+        // Build the display string with syntax hidden and formatting applied
+        let (displayString, _) = buildFormattedDisplayString(text: text)
+
+        // Get available width for wrapping
+        let availableWidth: CGFloat
+        if let textContainer = paneController?.textContainer {
+            availableWidth = textContainer.size.width - 40  // Account for insets
         } else {
-            drawFormattedMarkdown(text: text, at: point, in: context)
+            availableWidth = 760
+        }
+
+        // Use CTFramesetter to calculate line breaks on the display text
+        let framesetter = CTFramesetterCreateWithAttributedString(displayString)
+        let constraints = CGSize(width: availableWidth, height: CGFloat.greatestFiniteMagnitude)
+        let fitSize = CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter,
+            CFRange(location: 0, length: displayString.length),
+            nil,
+            constraints,
+            nil
+        )
+
+        let framePath = CGPath(rect: CGRect(x: 0, y: 0, width: availableWidth, height: fitSize.height), transform: nil)
+        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: displayString.length), framePath, nil)
+
+        // Draw inline code backgrounds first
+        drawInlineCodeBackgroundsForDisplayString(displayString: displayString, frame: frame, at: point, fitHeight: fitSize.height, in: context)
+
+        // Get lines and draw each one
+        let lines = CTFrameGetLines(frame) as! [CTLine]
+        var origins = [CGPoint](repeating: .zero, count: lines.count)
+        CTFrameGetLineOrigins(frame, CFRange(location: 0, length: lines.count), &origins)
+
+        context.saveGState()
+        context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+
+        for (index, line) in lines.enumerated() {
+            var ascent: CGFloat = 0
+            var descent: CGFloat = 0
+            CTLineGetTypographicBounds(line, &ascent, &descent, nil)
+
+            // Calculate y position - origins are from bottom of frame
+            let lineY = point.y + (fitSize.height - origins[index].y) - descent
+            context.textPosition = CGPoint(x: point.x + origins[index].x, y: lineY)
+            CTLineDraw(line, context)
+        }
+
+        context.restoreGState()
+    }
+
+    /// Build display string with syntax hidden and formatting applied.
+    /// Returns (attributed string, mapping from display position to source position).
+    private func buildFormattedDisplayString(text: String) -> (NSAttributedString, [Int: Int]) {
+        var displayText = ""
+        var positionMap: [Int: Int] = [:]  // display index -> source index
+        var attributes: [(range: Range<Int>, attrs: [NSAttributedString.Key: Any])] = []
+
+        // Sort tokens by position
+        let sortedTokens = tokens.sorted { $0.contentRange.lowerBound < $1.contentRange.lowerBound }
+
+        var sourceIndex = 0
+        var displayIndex = 0
+
+        for token in sortedTokens {
+            // Find syntax ranges before content
+            let syntaxBefore = token.syntaxRanges.filter { $0.upperBound <= token.contentRange.lowerBound }
+            let syntaxStart = syntaxBefore.map(\.lowerBound).min() ?? token.contentRange.lowerBound
+
+            // Add text between last position and this token's syntax
+            if sourceIndex < syntaxStart {
+                let plainText = substring(of: text, from: sourceIndex, to: syntaxStart)
+                for (i, _) in plainText.enumerated() {
+                    positionMap[displayIndex + i] = sourceIndex + i
+                }
+                displayText += plainText
+                displayIndex += plainText.count
+                sourceIndex = syntaxStart
+            }
+
+            // Skip leading syntax, add content with formatting
+            let contentText = substring(of: text, from: token.contentRange.lowerBound, to: token.contentRange.upperBound)
+            if !contentText.isEmpty {
+                let displayStart = displayIndex
+                for (i, _) in contentText.enumerated() {
+                    positionMap[displayIndex + i] = token.contentRange.lowerBound + i
+                }
+                displayText += contentText
+                displayIndex += contentText.count
+
+                // Record formatting for this range
+                let formatAttrs = attributesForElement(token.element)
+                attributes.append((range: displayStart..<displayIndex, attrs: formatAttrs))
+            }
+
+            // Skip trailing syntax
+            let syntaxAfter = token.syntaxRanges.filter { $0.lowerBound >= token.contentRange.upperBound }
+            sourceIndex = syntaxAfter.map(\.upperBound).max() ?? token.contentRange.upperBound
+        }
+
+        // Add remaining text after last token
+        if sourceIndex < text.count {
+            let remainingText = substring(of: text, from: sourceIndex, to: text.count)
+            for (i, _) in remainingText.enumerated() {
+                positionMap[displayIndex + i] = sourceIndex + i
+            }
+            displayText += remainingText
+        }
+
+        // Build attributed string
+        let attrString = NSMutableAttributedString(string: displayText, attributes: theme.bodyAttributes)
+
+        // Apply formatting
+        for (range, attrs) in attributes {
+            let nsRange = NSRange(location: range.lowerBound, length: range.upperBound - range.lowerBound)
+            if nsRange.location + nsRange.length <= attrString.length {
+                attrString.addAttributes(attrs, range: nsRange)
+            }
+        }
+
+        return (attrString, positionMap)
+    }
+
+    /// Draw inline code backgrounds for the formatted display string.
+    private func drawInlineCodeBackgroundsForDisplayString(displayString: NSAttributedString, frame: CTFrame, at point: CGPoint, fitHeight: CGFloat, in context: CGContext) {
+        // Find inline code ranges in the display string by checking for code font
+        let codeFont = theme.codeFont
+        var codeRanges: [NSRange] = []
+
+        displayString.enumerateAttribute(.font, in: NSRange(location: 0, length: displayString.length)) { value, range, _ in
+            if let font = value as? NSFont, font == codeFont {
+                codeRanges.append(range)
+            }
+        }
+
+        guard !codeRanges.isEmpty else { return }
+
+        let lines = CTFrameGetLines(frame) as! [CTLine]
+        var origins = [CGPoint](repeating: .zero, count: lines.count)
+        CTFrameGetLineOrigins(frame, CFRange(location: 0, length: lines.count), &origins)
+
+        let lineHeight = theme.bodyFont.ascender - theme.bodyFont.descender + theme.bodyFont.leading
+        let verticalPadding: CGFloat = 2.0
+        let horizontalPadding: CGFloat = 2.0
+        let cornerRadius: CGFloat = 3.0
+
+        context.saveGState()
+        context.setFillColor(theme.codeBackgroundColor.cgColor)
+
+        for codeRange in codeRanges {
+            // Find which line(s) this code is on
+            for (lineIndex, line) in lines.enumerated() {
+                let lineRange = CTLineGetStringRange(line)
+                let lineNSRange = NSRange(location: lineRange.location, length: lineRange.length)
+
+                // Check if code range intersects this line
+                let intersection = NSIntersectionRange(codeRange, lineNSRange)
+                if intersection.length > 0 {
+                    // Get x positions for start and end of code on this line
+                    let relativeStart = intersection.location - lineRange.location
+                    let relativeEnd = relativeStart + intersection.length
+
+                    let startX = CTLineGetOffsetForStringIndex(line, lineRange.location + relativeStart, nil)
+                    let endX = CTLineGetOffsetForStringIndex(line, lineRange.location + relativeEnd, nil)
+
+                    let lineY = point.y + (fitHeight - origins[lineIndex].y) - lineHeight
+
+                    let bgRect = CGRect(
+                        x: point.x + startX - horizontalPadding,
+                        y: lineY - verticalPadding,
+                        width: endX - startX + horizontalPadding * 2,
+                        height: lineHeight + verticalPadding * 2
+                    )
+                    let path = CGPath(roundedRect: bgRect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+                    context.addPath(path)
+                    context.fillPath()
+                }
+            }
+        }
+
+        context.restoreGState()
+    }
+
+    /// Draw attributed string using TextKit 2's line fragment positions.
+    private func drawLineFragments(attributedString: NSAttributedString, at point: CGPoint, in context: CGContext) {
+        for lineFragment in textLineFragments {
+            // Get the character range for this line (NSRange)
+            let nsRange = lineFragment.characterRange
+
+            guard nsRange.location >= 0, nsRange.location + nsRange.length <= attributedString.length else {
+                continue
+            }
+
+            // Extract substring for this line
+            let lineAttrString = attributedString.attributedSubstring(from: nsRange)
+
+            // Get position from line fragment
+            let origin = lineFragment.typographicBounds.origin
+            let linePoint = CGPoint(
+                x: point.x + origin.x,
+                y: point.y + origin.y
+            )
+
+            // Draw this line
+            drawAttributedString(lineAttrString, at: linePoint, in: context)
         }
     }
 
