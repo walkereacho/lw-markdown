@@ -10,6 +10,8 @@ final class SidebarIntegrationTests: XCTestCase {
 
     func testSidebarFileSelectionOpensDocument() throws {
         let controller = MainWindowController()
+        // MainWindowController creates an initial tab on init
+        let initialCount = controller.tabManager.tabs.count
 
         // Create temp workspace with file
         let tempDir = FileManager.default.temporaryDirectory
@@ -24,8 +26,10 @@ final class SidebarIntegrationTests: XCTestCase {
         try controller.workspaceManager.mountWorkspace(at: tempDir)
         controller.sidebarController?.onFileSelected?(testFile)
 
-        XCTAssertEqual(controller.tabManager.tabs.count, 1)
-        XCTAssertEqual(controller.tabManager.tabs.first?.filePath, testFile)
+        // File selection adds a new tab
+        XCTAssertEqual(controller.tabManager.tabs.count, initialCount + 1)
+        // The active document should be the selected file
+        XCTAssertEqual(controller.tabManager.activeDocument?.filePath, testFile)
     }
 
     func testOpenWorkspaceUpdatesFileTree() throws {

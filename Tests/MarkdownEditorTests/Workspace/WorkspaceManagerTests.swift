@@ -56,16 +56,17 @@ final class WorkspaceManagerTests: XCTestCase {
 
     func testSearchFilesMatchingPattern() throws {
         // Create test files with various names
+        // Note: searchFiles only returns .md files
         let subdir = tempDir.appendingPathComponent("subdir")
         try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
         try "test".write(to: tempDir.appendingPathComponent("readme.md"), atomically: true, encoding: .utf8)
-        try "test".write(to: tempDir.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
-        try "test".write(to: subdir.appendingPathComponent("readme.txt"), atomically: true, encoding: .utf8)
+        try "test".write(to: tempDir.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
+        try "test".write(to: subdir.appendingPathComponent("readme-notes.md"), atomically: true, encoding: .utf8)
 
         let manager = WorkspaceManager()
         try manager.mountWorkspace(at: tempDir)
 
-        // Search for "readme"
+        // Search for "readme" - should find readme.md and readme-notes.md
         let results = manager.searchFiles(matching: "readme")
         XCTAssertEqual(results.count, 2)
         XCTAssertTrue(results.allSatisfy { $0.lastPathComponent.lowercased().contains("readme") })

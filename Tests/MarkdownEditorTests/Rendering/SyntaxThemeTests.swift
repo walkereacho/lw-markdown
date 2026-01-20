@@ -37,9 +37,14 @@ final class SyntaxThemeTests: XCTestCase {
         XCTAssertGreaterThan(h1Font!.pointSize, h6Font!.pointSize)
     }
 
-    func testInlineCodeAttributesHaveBackgroundColor() {
+    func testInlineCodeAttributesHaveCodeFont() {
+        // Note: backgroundColor is drawn manually for full line height,
+        // so it's not included in the attributes dictionary
         let attrs = SyntaxTheme.default.inlineCodeAttributes
-        XCTAssertNotNil(attrs[.backgroundColor])
+        XCTAssertNotNil(attrs[.font])
+        // Verify it uses the code font
+        let font = attrs[.font] as? NSFont
+        XCTAssertEqual(font, SyntaxTheme.default.codeFont)
     }
 
     func testLinkAttributesHaveUnderline() {

@@ -33,8 +33,11 @@ final class TabManagerTests: XCTestCase {
         let closed = manager.closeTab(documentId: document.id)
 
         XCTAssertTrue(closed)
-        XCTAssertEqual(manager.tabs.count, 0)
-        XCTAssertNil(manager.activeDocumentId)
+        // TabManager auto-creates a new document when closing the last tab
+        XCTAssertEqual(manager.tabs.count, 1)
+        XCTAssertNotNil(manager.activeDocumentId)
+        // The active document should be a new one, not the closed one
+        XCTAssertNotEqual(manager.activeDocumentId, document.id)
     }
 
     func testActivateTab() {

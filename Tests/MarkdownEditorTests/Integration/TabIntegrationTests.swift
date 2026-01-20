@@ -10,14 +10,21 @@ final class TabIntegrationTests: XCTestCase {
 
     func testNewDocumentCreatesTab() {
         let controller = MainWindowController()
+        // MainWindowController creates an initial tab on init
+        let initialCount = controller.tabManager.tabs.count
+        XCTAssertEqual(initialCount, 1)
+
         controller.newDocument()
 
-        XCTAssertEqual(controller.tabManager.tabs.count, 1)
+        // After newDocument(), we should have one more tab
+        XCTAssertEqual(controller.tabManager.tabs.count, initialCount + 1)
         XCTAssertNotNil(controller.tabManager.activeDocument)
     }
 
     func testOpenDocumentCreatesTab() throws {
         let controller = MainWindowController()
+        // MainWindowController creates an initial tab on init
+        let initialCount = controller.tabManager.tabs.count
 
         // Create temp file
         let tempDir = FileManager.default.temporaryDirectory
@@ -27,17 +34,20 @@ final class TabIntegrationTests: XCTestCase {
 
         try controller.openFile(at: testFile)
 
-        XCTAssertEqual(controller.tabManager.tabs.count, 1)
-        XCTAssertEqual(controller.tabManager.tabs.first?.title, testFile.lastPathComponent)
+        // Opening a file adds a new tab
+        XCTAssertEqual(controller.tabManager.tabs.count, initialCount + 1)
+        // The active tab should be the opened file
+        XCTAssertEqual(controller.tabManager.activeDocument?.filePath, testFile)
     }
 
     func testTabBarViewConnected() {
         let controller = MainWindowController()
-        controller.newDocument()
-        controller.newDocument()
+        // MainWindowController creates an initial tab on init (1 tab)
+        controller.newDocument()  // 2 tabs
+        controller.newDocument()  // 3 tabs
 
-        // Tab bar should reflect tab count
-        XCTAssertEqual(controller.tabBarView?.tabManager?.tabs.count, 2)
+        // Tab bar should reflect tab count (initial + 2 new)
+        XCTAssertEqual(controller.tabBarView?.tabManager?.tabs.count, 3)
     }
 
     func testSaveDocumentUpdatesDirtyState() throws {

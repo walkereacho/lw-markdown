@@ -5,10 +5,12 @@ final class FullIntegrationTests: XCTestCase {
 
     func testFullWorkflow() throws {
         let controller = MainWindowController()
+        // MainWindowController creates an initial tab on init
+        let initialCount = controller.tabManager.tabs.count
 
         // 1. Create new document
         controller.newDocument()
-        XCTAssertEqual(controller.tabManager.tabs.count, 1)
+        XCTAssertEqual(controller.tabManager.tabs.count, initialCount + 1)
 
         // 2. Type some Markdown
         guard let document = controller.tabManager.activeDocument else {
@@ -32,7 +34,7 @@ final class FullIntegrationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: testFile) }
 
         try controller.openFile(at: testFile)
-        XCTAssertEqual(controller.tabManager.tabs.count, 2)
+        XCTAssertEqual(controller.tabManager.tabs.count, initialCount + 2)
 
         // 5. Verify tab switching works
         controller.tabManager.activateTab(documentId: document.id)
@@ -67,6 +69,8 @@ final class FullIntegrationTests: XCTestCase {
 
     func testWorkspaceWithTabs() throws {
         let controller = MainWindowController()
+        // MainWindowController creates an initial tab on init
+        let initialCount = controller.tabManager.tabs.count
 
         // Create temp workspace with multiple files
         let tempDir = FileManager.default.temporaryDirectory
@@ -86,10 +90,10 @@ final class FullIntegrationTests: XCTestCase {
 
         // Simulate selecting files from sidebar
         controller.sidebarController?.onFileSelected?(file1)
-        XCTAssertEqual(controller.tabManager.tabs.count, 1)
+        XCTAssertEqual(controller.tabManager.tabs.count, initialCount + 1)
 
         controller.sidebarController?.onFileSelected?(file2)
-        XCTAssertEqual(controller.tabManager.tabs.count, 2)
+        XCTAssertEqual(controller.tabManager.tabs.count, initialCount + 2)
 
         // Verify both tabs exist
         let tabTitles = controller.tabManager.tabs.map { $0.title }
@@ -99,8 +103,7 @@ final class FullIntegrationTests: XCTestCase {
 
     func testDirtyStateTracking() throws {
         let controller = MainWindowController()
-        controller.newDocument()
-
+        // Use the initial document that MainWindowController creates
         guard let document = controller.tabManager.activeDocument else {
             XCTFail("No document")
             return
@@ -117,13 +120,15 @@ final class FullIntegrationTests: XCTestCase {
         // Should be dirty now
         XCTAssertTrue(document.isDirty)
 
-        // Tab should reflect dirty state
-        let tab = controller.tabManager.tabs.first
+        // Tab should reflect dirty state - find the tab for the active document
+        let tab = controller.tabManager.tabs.first { $0.documentId == document.id }
         XCTAssertTrue(tab?.isDirty ?? false)
     }
 
     func testMultipleDocumentsWithParsing() throws {
         let controller = MainWindowController()
+        // MainWindowController creates an initial tab on init
+        let initialCount = controller.tabManager.tabs.count
 
         // Create multiple documents with different content
         controller.newDocument()
@@ -140,8 +145,8 @@ final class FullIntegrationTests: XCTestCase {
         }
         doc2.contentStorage.attributedString = NSAttributedString(string: "## Document 2\n\n*Italic text*")
 
-        // Both documents exist
-        XCTAssertEqual(controller.tabManager.tabs.count, 2)
+        // Both new documents exist (plus initial)
+        XCTAssertEqual(controller.tabManager.tabs.count, initialCount + 2)
 
         // Switch between tabs
         controller.tabManager.activateTab(documentId: doc1.id)
