@@ -234,27 +234,57 @@ final class PaneController: NSObject {
                 // Parse for other block-level elements
                 let tokens = layoutDelegate.tokenProvider.parse(para)
 
-                var fontApplied = false
+                var isBlockElement = false
                 for token in tokens {
                     switch token.element {
                     case .heading(let level):
                         let font = theme.headingFonts[level] ?? theme.bodyFont
                         textStorage.addAttribute(.font, value: font, range: range)
-                        fontApplied = true
+                        isBlockElement = true
 
                     case .blockquote:
                         textStorage.addAttribute(.font, value: theme.italicFont, range: range)
-                        fontApplied = true
+                        isBlockElement = true
 
                     case .unorderedListItem, .orderedListItem:
-                        // Lists use body font (already set), no change needed
-                        fontApplied = true
+                        // Lists use body font (already set), but apply inline formatting
+                        isBlockElement = false  // Allow inline formatting
 
                     default:
                         break
                     }
 
-                    if fontApplied { break }
+                    if isBlockElement { break }
+                }
+
+                // Apply inline formatting fonts for cursor accuracy (body paragraphs and lists)
+                if !isBlockElement {
+                    for token in tokens {
+                        let font: NSFont?
+                        switch token.element {
+                        case .bold:
+                            font = theme.boldFont
+                        case .italic:
+                            font = theme.italicFont
+                        case .boldItalic:
+                            font = theme.boldItalicFont
+                        case .inlineCode:
+                            font = theme.codeFont
+                        default:
+                            continue
+                        }
+
+                        guard let targetFont = font else { continue }
+
+                        // Apply font to content range within this paragraph
+                        let contentStart = offset + token.contentRange.lowerBound
+                        let contentLength = token.contentRange.count
+
+                        guard contentStart >= 0, contentStart + contentLength <= textStorage.length else { continue }
+
+                        let contentNSRange = NSRange(location: contentStart, length: contentLength)
+                        textStorage.addAttribute(.font, value: targetFont, range: contentNSRange)
+                    }
                 }
             }
 
