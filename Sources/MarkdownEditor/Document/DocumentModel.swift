@@ -322,6 +322,8 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         // For body paragraphs, also apply inline formatting fonts for cursor accuracy
         // This ensures TextKit 2's layout matches our rendering
         if currentType == .body {
+            // Applying fonts to token ranges can move cursor; remember position to restore
+            cursorRestorePosition = editedRange.location + editedRange.length
             theme.applyInlineFormattingFonts(to: textStorage, tokens: tokens, paragraphOffset: paragraphRange.location)
         }
     }
