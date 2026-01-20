@@ -202,6 +202,9 @@ final class PaneController: NSObject {
 
     // MARK: - Font Attribute Styling
 
+    /// Total indent for list items - must match DocumentModel.listIndent and MarkdownLayoutFragment.listIndent
+    private let listIndent: CGFloat = 20.0
+
     /// Apply fonts to ALL paragraphs based on their type. O(N) - only for initialization.
     /// Handles headings, code blocks, blockquotes, and lists.
     private func applyFontsToAllParagraphs() {
@@ -257,10 +260,20 @@ final class PaneController: NSObject {
 
                     case .blockquote:
                         textStorage.addAttribute(.font, value: theme.italicFont, range: range)
+                        // Apply paragraph style for blockquotes (matches DocumentModel.willProcessEditing)
+                        let blockquoteStyle = NSMutableParagraphStyle()
+                        blockquoteStyle.headIndent = 20.0  // barSpacing + contentIndent
+                        blockquoteStyle.firstLineHeadIndent = 0
+                        textStorage.addAttribute(.paragraphStyle, value: blockquoteStyle, range: range)
                         isBlockElement = true
 
                     case .unorderedListItem, .orderedListItem:
-                        // Lists use body font (already set), but apply inline formatting
+                        // Lists use body font (already set), but apply paragraph style for indent
+                        // This must match DocumentModel.willProcessEditing for cursor alignment
+                        let listStyle = NSMutableParagraphStyle()
+                        listStyle.firstLineHeadIndent = listIndent
+                        listStyle.headIndent = listIndent
+                        textStorage.addAttribute(.paragraphStyle, value: listStyle, range: range)
                         isBlockElement = false  // Allow inline formatting
 
                     default:

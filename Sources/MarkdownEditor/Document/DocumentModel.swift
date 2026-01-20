@@ -295,17 +295,18 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         }
         guard attributeRange.length > 0 else { return }
 
-        if typeChanged {
-            // Type changed: apply font and paragraph style to entire paragraph
-            textStorage.addAttribute(.font, value: targetFont, range: attributeRange)
+        // Always apply paragraph style for lists (needed for cursor positioning)
+        // Do this before checking typeChanged so it applies on every edit
+        if let paragraphStyle = paragraphStyleForType(currentType) {
+            textStorage.addAttribute(.paragraphStyle, value: paragraphStyle, range: attributeRange)
+        } else {
+            // Remove paragraph style for non-indented elements
+            textStorage.removeAttribute(.paragraphStyle, range: attributeRange)
+        }
 
-            // Apply paragraph style for indented elements
-            if let paragraphStyle = paragraphStyleForType(currentType) {
-                textStorage.addAttribute(.paragraphStyle, value: paragraphStyle, range: attributeRange)
-            } else {
-                // Remove paragraph style for non-indented elements
-                textStorage.removeAttribute(.paragraphStyle, range: attributeRange)
-            }
+        if typeChanged {
+            // Type changed: apply font to entire paragraph
+            textStorage.addAttribute(.font, value: targetFont, range: attributeRange)
 
             // Remember where cursor SHOULD be after edit completes
             cursorRestorePosition = editedRange.location + editedRange.length
@@ -328,28 +329,19 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         }
     }
 
+    /// Total indent for list items - must match MarkdownLayoutFragment.listIndent
+    private let listIndent: CGFloat = 20.0
+
     /// Create paragraph style for indented element types.
+    /// For lists, we add the total indent so TextKit 2 cursor positioning matches rendering.
     private func paragraphStyleForType(_ type: ParagraphType) -> NSParagraphStyle? {
         let style = NSMutableParagraphStyle()
 
         switch type {
-        case .unorderedList(let depth):
-            // Match indentation from MarkdownLayoutFragment
-            let indentPerLevel: CGFloat = 20.0
-            let bulletWidth: CGFloat = 16.0
-            let baseIndent = CGFloat(depth - 1) * indentPerLevel
-            style.headIndent = baseIndent + bulletWidth
-            style.firstLineHeadIndent = baseIndent
-            return style
-
-        case .orderedList(let depth):
-            // Match indentation from MarkdownLayoutFragment
-            let indentPerLevel: CGFloat = 18.0
-            let numberColumnWidth: CGFloat = 20.0
-            let numberRightPadding: CGFloat = 4.0
-            let baseIndent = CGFloat(depth - 1) * indentPerLevel
-            style.headIndent = baseIndent + numberColumnWidth + numberRightPadding
-            style.firstLineHeadIndent = baseIndent
+        case .unorderedList, .orderedList:
+            // Add list indent to match rendering layer
+            style.firstLineHeadIndent = listIndent
+            style.headIndent = listIndent
             return style
 
         case .blockquote:
@@ -427,28 +419,17 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
 
     /// Detect previous paragraph type from its font and paragraph style.
     private func detectPreviousParagraphType(font: NSFont?, paragraphStyle: NSParagraphStyle?, theme: SyntaxTheme) -> ParagraphType {
-        // Check paragraph style first for list detection
+        // Check paragraph style for element detection
         if let style = paragraphStyle, style.headIndent > 0 {
-            // Has indentation - likely a list or blockquote
-            // Use headIndent values to distinguish types
-            let headIndent = style.headIndent
-
-            // Check for unordered list pattern (bulletWidth = 16)
-            if headIndent.truncatingRemainder(dividingBy: 20.0) == 16.0 ||
-               headIndent == 16.0 {
-                let depth = Int((headIndent - 16.0) / 20.0) + 1
-                return .unorderedList(depth: max(1, depth))
+            // Check for list pattern (listIndent = 20)
+            if style.headIndent == listIndent && style.firstLineHeadIndent == listIndent {
+                // Could be either ordered or unordered - return unordered as default
+                // The exact type will be determined by parsing anyway
+                return .unorderedList(depth: 1)
             }
-
-            // Check for ordered list pattern (numberColumnWidth + padding = 24)
-            if headIndent.truncatingRemainder(dividingBy: 18.0) == 24.0 ||
-               headIndent == 24.0 {
-                let depth = Int((headIndent - 24.0) / 18.0) + 1
-                return .orderedList(depth: max(1, depth))
-            }
-
             // Check for blockquote pattern (barSpacing + contentIndent = 20)
-            if headIndent == 20.0 {
+            // Note: blockquote uses headIndent=20 but firstLineHeadIndent=0, so it won't match list
+            if style.headIndent == 20.0 && style.firstLineHeadIndent == 0 {
                 return .blockquote
             }
         }
