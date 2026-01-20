@@ -50,10 +50,6 @@ final class CommentCardView: NSView {
         headerContainer.translatesAutoresizingMaskIntoConstraints = false
         cardContainer.addSubview(headerContainer)
 
-        checkbox = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleResolved))
-        checkbox.translatesAutoresizingMaskIntoConstraints = false
-        headerContainer.addSubview(checkbox)
-
         disclosureButton = NSButton(image: NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Expand")!, target: self, action: #selector(toggleCollapsed))
         disclosureButton.translatesAutoresizingMaskIntoConstraints = false
         disclosureButton.bezelStyle = .inline
@@ -87,6 +83,13 @@ final class CommentCardView: NSView {
         contentLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         cardContainer.addSubview(contentLabel)
 
+        // Resolve button at bottom right (checkmark icon like trash)
+        checkbox = NSButton(image: NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: "Mark resolved")!, target: self, action: #selector(toggleResolved))
+        checkbox.translatesAutoresizingMaskIntoConstraints = false
+        checkbox.bezelStyle = .inline
+        checkbox.isBordered = false
+        cardContainer.addSubview(checkbox)
+
         NSLayoutConstraint.activate([
             // Card container fills view with padding for shadow
             cardContainer.topAnchor.constraint(equalTo: topAnchor, constant: 2),
@@ -105,12 +108,8 @@ final class CommentCardView: NSView {
             headerContainer.leadingAnchor.constraint(equalTo: accentBar.trailingAnchor, constant: 12),
             headerContainer.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor, constant: -12),
 
-            // Checkbox
-            checkbox.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
-            checkbox.centerYAnchor.constraint(equalTo: headerContainer.centerYAnchor),
-
-            // Disclosure
-            disclosureButton.leadingAnchor.constraint(equalTo: checkbox.trailingAnchor, constant: 6),
+            // Disclosure at leading edge
+            disclosureButton.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
             disclosureButton.centerYAnchor.constraint(equalTo: headerContainer.centerYAnchor),
             disclosureButton.widthAnchor.constraint(equalToConstant: 16),
             disclosureButton.heightAnchor.constraint(equalToConstant: 16),
@@ -135,9 +134,15 @@ final class CommentCardView: NSView {
 
             // Content label
             contentLabel.leadingAnchor.constraint(equalTo: accentBar.trailingAnchor, constant: 12),
-            contentLabel.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor, constant: -12),
+            contentLabel.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor, constant: -40),
             contentLabel.topAnchor.constraint(equalTo: headerContainer.bottomAnchor, constant: 8),
             contentLabel.bottomAnchor.constraint(equalTo: cardContainer.bottomAnchor, constant: -12),
+
+            // Resolve button at bottom right - matches delete button size and spacing
+            checkbox.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor, constant: -12),
+            checkbox.bottomAnchor.constraint(equalTo: cardContainer.bottomAnchor, constant: -12),
+            checkbox.widthAnchor.constraint(equalToConstant: 18),
+            checkbox.heightAnchor.constraint(equalToConstant: 18),
         ])
 
         let trackingArea = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self, userInfo: nil)
@@ -154,7 +159,8 @@ final class CommentCardView: NSView {
         anchorLabel.stringValue = "\"\(truncated)\(suffix)\""
         contentLabel.stringValue = comment.content
         contentLabel.isHidden = comment.isCollapsed
-        checkbox.state = comment.isResolved ? .on : .off
+        let resolveIcon = comment.isResolved ? "checkmark.circle.fill" : "checkmark.circle"
+        checkbox.image = NSImage(systemSymbolName: resolveIcon, accessibilityDescription: nil)
         let iconName = comment.isCollapsed ? "chevron.right" : "chevron.down"
         disclosureButton.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
 
@@ -172,9 +178,11 @@ final class CommentCardView: NSView {
         if comment.isResolved {
             cardContainer.alphaValue = 0.6
             accentBar.layer?.backgroundColor = colors.sidebarSecondaryText.withAlphaComponent(0.3).cgColor
+            checkbox.contentTintColor = colors.accentPrimary
         } else {
             cardContainer.alphaValue = 1.0
             accentBar.layer?.backgroundColor = colors.accentPrimary.cgColor
+            checkbox.contentTintColor = colors.sidebarSecondaryText
         }
     }
 

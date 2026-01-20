@@ -30,6 +30,7 @@ final class CommentSidebarController: NSViewController {
     private var borderView: NSView!
     private var inputTextView: CommentInputTextView?
     private var pendingAnchorText: String?
+    private var pendingAnchorRange: Range<String.Index>?
     private var isResolvedExpanded = false
     private var themeObserver: NSObjectProtocol?
     private var orphanCheckWorkItem: DispatchWorkItem?
@@ -328,8 +329,10 @@ final class CommentSidebarController: NSViewController {
         rebuildCommentList()
     }
 
-    func beginAddingComment(anchorText: String) {
+    func beginAddingComment(anchorText: String, anchorRange: Range<String.Index>? = nil) {
         pendingAnchorText = anchorText
+        // Store the range - if not provided, find first occurrence
+        pendingAnchorRange = anchorRange ?? documentText.range(of: anchorText)
         let colors = ThemeManager.shared.colors
         let theme = ThemeManager.shared.current
 
@@ -469,7 +472,8 @@ final class CommentSidebarController: NSViewController {
 
     /// Calculate where to insert a new comment card based on document position
     private func calculateInsertionIndex(for anchorText: String) -> Int {
-        guard let newPosition = documentText.range(of: anchorText)?.lowerBound else {
+        // Use the pending range if available (for correct occurrence), otherwise find first occurrence
+        guard let newPosition = (pendingAnchorRange ?? documentText.range(of: anchorText))?.lowerBound else {
             return 0 // If anchor not found, insert at top
         }
 
@@ -491,9 +495,24 @@ final class CommentSidebarController: NSViewController {
             cancelAddingComment()
             return
         }
-        let comment = Comment(anchorText: anchorText, content: content)
+
+        // Calculate occurrence index and capture context
+        var occurrenceIndex = 1
+        var context: AnchorContext? = nil
+        if let range = pendingAnchorRange {
+            occurrenceIndex = CommentStore.occurrenceIndex(of: anchorText, at: range, in: documentText)
+            context = CommentStore.captureContext(for: range, in: documentText)
+        }
+
+        let comment = Comment(
+            anchorText: anchorText,
+            content: content,
+            anchorOccurrence: occurrenceIndex,
+            anchorContext: context
+        )
         commentStore.comments.append(comment)
         pendingAnchorText = nil
+        pendingAnchorRange = nil
         inputTextView = nil
         onCommentStoreChanged?(commentStore)
         rebuildCommentList()
@@ -501,6 +520,7 @@ final class CommentSidebarController: NSViewController {
 
     private func cancelAddingComment() {
         pendingAnchorText = nil
+        pendingAnchorRange = nil
         inputTextView = nil
         rebuildCommentList()
     }
@@ -514,20 +534,36 @@ final class CommentSidebarController: NSViewController {
 
     func checkForOrphans() {
         var orphanedIds: [UUID] = []
-        for comment in commentStore.comments {
-            if commentStore.findAnchorRange(for: comment, in: documentText) == nil {
+        var needsSave = false
+
+        for (index, comment) in commentStore.comments.enumerated() {
+            if let match = commentStore.findAnchorMatch(for: comment, in: documentText) {
+                // Self-healing: if anchor found at different occurrence, update silently
+                if match.occurrenceIndex != comment.anchorOccurrence {
+                    commentStore.comments[index].anchorOccurrence = match.occurrenceIndex
+                    // Also update context to current position
+                    commentStore.comments[index].anchorContext = CommentStore.captureContext(
+                        for: match.range,
+                        in: documentText
+                    )
+                    needsSave = true
+                }
+            } else {
                 orphanedIds.append(comment.id)
             }
         }
-        guard !orphanedIds.isEmpty else { return }
+
         for id in orphanedIds {
             if let comment = commentStore.comments.first(where: { $0.id == id }) {
                 showOrphanToast(anchorText: comment.anchorText)
             }
             commentStore.comments.removeAll { $0.id == id }
         }
-        onCommentStoreChanged?(commentStore)
-        rebuildCommentList()
+
+        if !orphanedIds.isEmpty || needsSave {
+            onCommentStoreChanged?(commentStore)
+            rebuildCommentList()
+        }
     }
 
     private func showOrphanToast(anchorText: String) {
