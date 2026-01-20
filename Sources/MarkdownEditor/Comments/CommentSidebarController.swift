@@ -1,5 +1,15 @@
 import AppKit
 
+/// NSTextView subclass for comment input
+final class CommentInputTextView: NSTextView {
+    var onSubmit: (() -> Void)?
+}
+
+/// Flipped clip view to pin content to top of scroll view
+final class TopAlignedClipView: NSClipView {
+    override var isFlipped: Bool { true }
+}
+
 final class CommentSidebarController: NSViewController {
     var commentStore: CommentStore = CommentStore() { didSet { rebuildCommentList() } }
     var documentText: String = "" { didSet { rebuildCommentList(); scheduleOrphanCheck() } }
@@ -15,8 +25,10 @@ final class CommentSidebarController: NSViewController {
     private var resolvedSection: NSView!
     private var resolvedDisclosure: NSButton!
     private var resolvedStack: NSStackView!
+    private var resolvedCollapsedConstraint: NSLayoutConstraint!
+    private var resolvedExpandedConstraint: NSLayoutConstraint!
     private var borderView: NSView!
-    private var inputTextView: NSTextView?
+    private var inputTextView: CommentInputTextView?
     private var pendingAnchorText: String?
     private var isResolvedExpanded = false
     private var themeObserver: NSObjectProtocol?
@@ -48,9 +60,29 @@ final class CommentSidebarController: NSViewController {
         headerView.wantsLayer = true
         view.addSubview(headerView)
 
-        titleLabel = NSTextField(labelWithString: "Comments (0)")
+        // Comment icon
+        let iconView = NSImageView()
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "Comments")
+        iconView.contentTintColor = ThemeManager.shared.colors.accentPrimary
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        headerView.addSubview(iconView)
+
+        titleLabel = NSTextField(labelWithString: "Comments")
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(titleLabel)
+
+        // Count badge
+        let countBadge = NSView()
+        countBadge.translatesAutoresizingMaskIntoConstraints = false
+        countBadge.wantsLayer = true
+        countBadge.identifier = NSUserInterfaceItemIdentifier("countBadge")
+        headerView.addSubview(countBadge)
+
+        let countLabel = NSTextField(labelWithString: "0")
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+        countLabel.identifier = NSUserInterfaceItemIdentifier("countLabel")
+        countBadge.addSubview(countLabel)
 
         closeButton = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")!, target: self, action: #selector(closeSidebar))
         closeButton.translatesAutoresizingMaskIntoConstraints = false
@@ -62,13 +94,30 @@ final class CommentSidebarController: NSViewController {
             headerView.topAnchor.constraint(equalTo: view.topAnchor),
             headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            headerView.heightAnchor.constraint(equalToConstant: 36),
-            titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 12),
+            headerView.heightAnchor.constraint(equalToConstant: 44),
+
+            iconView.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 14),
+            iconView.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
             titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            closeButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -8),
+
+            countBadge.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 8),
+            countBadge.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            countBadge.heightAnchor.constraint(equalToConstant: 20),
+            countBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
+
+            countLabel.centerXAnchor.constraint(equalTo: countBadge.centerXAnchor),
+            countLabel.centerYAnchor.constraint(equalTo: countBadge.centerYAnchor),
+            countLabel.leadingAnchor.constraint(greaterThanOrEqualTo: countBadge.leadingAnchor, constant: 6),
+            countLabel.trailingAnchor.constraint(lessThanOrEqualTo: countBadge.trailingAnchor, constant: -6),
+
+            closeButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -10),
             closeButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 20),
-            closeButton.heightAnchor.constraint(equalToConstant: 20),
+            closeButton.widthAnchor.constraint(equalToConstant: 22),
+            closeButton.heightAnchor.constraint(equalToConstant: 22),
         ])
     }
 
@@ -79,7 +128,7 @@ final class CommentSidebarController: NSViewController {
         view.addSubview(borderView)
         NSLayoutConstraint.activate([
             borderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            borderView.topAnchor.constraint(equalTo: view.topAnchor, constant: 36),
+            borderView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             borderView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             borderView.widthAnchor.constraint(equalToConstant: 1),
         ])
@@ -93,18 +142,24 @@ final class CommentSidebarController: NSViewController {
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = false
+        // Use flipped clip view to pin content to top
+        let clipView = TopAlignedClipView()
+        clipView.drawsBackground = false
+        scrollView.contentView = clipView
         view.addSubview(scrollView)
 
         stackView = NSStackView()
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.orientation = .vertical
         stackView.alignment = .leading
-        stackView.spacing = 8
-        stackView.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        stackView.spacing = 12  // Increased spacing for elevated cards
+        stackView.edgeInsets = NSEdgeInsets(top: 12, left: 10, bottom: 16, right: 10)
+        // Ensure stack hugs content and stays at top
+        stackView.setHuggingPriority(.required, for: .vertical)
         scrollView.documentView = stackView
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 4),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -130,9 +185,13 @@ final class CommentSidebarController: NSViewController {
         resolvedStack.translatesAutoresizingMaskIntoConstraints = false
         resolvedStack.orientation = .vertical
         resolvedStack.alignment = .leading
-        resolvedStack.spacing = 8
+        resolvedStack.spacing = 12
         resolvedStack.isHidden = true
         resolvedSection.addSubview(resolvedStack)
+
+        // Create both constraints but only activate collapsed one initially
+        resolvedCollapsedConstraint = resolvedDisclosure.bottomAnchor.constraint(equalTo: resolvedSection.bottomAnchor)
+        resolvedExpandedConstraint = resolvedStack.bottomAnchor.constraint(equalTo: resolvedSection.bottomAnchor)
 
         NSLayoutConstraint.activate([
             resolvedDisclosure.leadingAnchor.constraint(equalTo: resolvedSection.leadingAnchor),
@@ -140,21 +199,50 @@ final class CommentSidebarController: NSViewController {
             resolvedStack.leadingAnchor.constraint(equalTo: resolvedSection.leadingAnchor),
             resolvedStack.trailingAnchor.constraint(equalTo: resolvedSection.trailingAnchor),
             resolvedStack.topAnchor.constraint(equalTo: resolvedDisclosure.bottomAnchor, constant: 8),
-            resolvedStack.bottomAnchor.constraint(equalTo: resolvedSection.bottomAnchor),
+            resolvedCollapsedConstraint,  // Start collapsed
         ])
     }
 
     private func applyTheme() {
         let colors = ThemeManager.shared.colors
         let theme = ThemeManager.shared.current
+
+        // Main view background
         view.layer?.backgroundColor = colors.sidebarBackground.cgColor
+
+        // Header styling
         headerView.layer?.backgroundColor = colors.sidebarBackground.cgColor
-        borderView.layer?.backgroundColor = colors.shellBorder.cgColor
-        titleLabel.font = theme.uiFont(size: 13, weight: .semibold)
+
+        // Find and style header elements
+        if let iconView = headerView.subviews.first(where: { $0 is NSImageView }) as? NSImageView {
+            iconView.contentTintColor = colors.accentPrimary
+        }
+
+        titleLabel.font = theme.uiFont(size: 14, weight: .semibold)
         titleLabel.textColor = colors.sidebarText
+
+        // Style count badge
+        if let countBadge = headerView.subviews.first(where: { $0.identifier?.rawValue == "countBadge" }) {
+            countBadge.layer?.backgroundColor = colors.accentPrimary.withAlphaComponent(0.15).cgColor
+            countBadge.layer?.cornerRadius = 10
+
+            if let countLabel = countBadge.subviews.first(where: { $0.identifier?.rawValue == "countLabel" }) as? NSTextField {
+                countLabel.font = theme.uiFont(size: 11, weight: .semibold)
+                countLabel.textColor = colors.accentPrimary
+            }
+        }
+
         closeButton.contentTintColor = colors.sidebarSecondaryText
+
+        // Border
+        borderView.layer?.backgroundColor = colors.shellBorder.cgColor
+
+        // Resolved section styling
         resolvedDisclosure.font = theme.uiFont(size: 12, weight: .medium)
+        resolvedDisclosure.contentTintColor = colors.sidebarSecondaryText
         (resolvedDisclosure.cell as? NSButtonCell)?.backgroundColor = .clear
+
+        // Apply theme to all cards
         for case let card as CommentCardView in stackView.arrangedSubviews { card.applyTheme() }
         for case let card as CommentCardView in resolvedStack.arrangedSubviews { card.applyTheme() }
     }
@@ -165,7 +253,15 @@ final class CommentSidebarController: NSViewController {
         resolvedStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let unresolved = commentStore.unresolvedComments(sortedBy: documentText)
         let resolved = commentStore.resolvedComments()
-        titleLabel?.stringValue = "Comments (\(commentStore.comments.count))"
+
+        // Update count badge
+        if let countBadge = headerView?.subviews.first(where: { $0.identifier?.rawValue == "countBadge" }),
+           let countLabel = countBadge.subviews.first(where: { $0.identifier?.rawValue == "countLabel" }) as? NSTextField {
+            let count = commentStore.comments.count
+            countLabel.stringValue = "\(count)"
+            countBadge.isHidden = count == 0
+        }
+
         for comment in unresolved {
             let card = createCommentCard(for: comment)
             stackView.addArrangedSubview(card)
@@ -201,6 +297,15 @@ final class CommentSidebarController: NSViewController {
         resolvedStack.isHidden = !isResolvedExpanded
         let iconName = isResolvedExpanded ? "chevron.down" : "chevron.right"
         resolvedDisclosure.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
+
+        // Swap constraints for proper height
+        if isResolvedExpanded {
+            resolvedCollapsedConstraint.isActive = false
+            resolvedExpandedConstraint.isActive = true
+        } else {
+            resolvedExpandedConstraint.isActive = false
+            resolvedCollapsedConstraint.isActive = true
+        }
     }
 
     private func toggleResolved(commentId: UUID) {
@@ -225,24 +330,56 @@ final class CommentSidebarController: NSViewController {
 
     func beginAddingComment(anchorText: String) {
         pendingAnchorText = anchorText
+        let colors = ThemeManager.shared.colors
+        let theme = ThemeManager.shared.current
+
+        // Outer container for shadow (shadows get clipped by masksToBounds)
         let inputCard = NSView()
         inputCard.translatesAutoresizingMaskIntoConstraints = false
         inputCard.wantsLayer = true
-        let colors = ThemeManager.shared.colors
-        let theme = ThemeManager.shared.current
-        inputCard.layer?.backgroundColor = colors.shellSecondaryBackground.cgColor
-        inputCard.layer?.cornerRadius = theme.radiusSM
-        inputCard.layer?.borderWidth = 1
-        inputCard.layer?.borderColor = colors.accentPrimary.cgColor
+        inputCard.identifier = NSUserInterfaceItemIdentifier("inputCard")
 
+        // Inner card container
+        let cardContainer = NSView()
+        cardContainer.translatesAutoresizingMaskIntoConstraints = false
+        cardContainer.wantsLayer = true
+        cardContainer.layer?.backgroundColor = colors.shellBackground.cgColor
+        cardContainer.layer?.cornerRadius = theme.radiusSM
+        cardContainer.layer?.borderWidth = 1
+        cardContainer.layer?.borderColor = colors.accentPrimary.withAlphaComponent(0.4).cgColor
+        cardContainer.layer?.shadowColor = NSColor.black.withAlphaComponent(0.08).cgColor
+        cardContainer.layer?.shadowOffset = CGSize(width: 0, height: 1)
+        cardContainer.layer?.shadowRadius = 3
+        cardContainer.layer?.shadowOpacity = 1.0
+        cardContainer.layer?.masksToBounds = false
+        inputCard.addSubview(cardContainer)
+
+        // Accent bar
+        let accentBar = NSView()
+        accentBar.translatesAutoresizingMaskIntoConstraints = false
+        accentBar.wantsLayer = true
+        accentBar.layer?.backgroundColor = colors.accentPrimary.cgColor
+        accentBar.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        accentBar.layer?.cornerRadius = theme.radiusSM
+        cardContainer.addSubview(accentBar)
+
+        // Header with "New Comment" label
+        let headerLabel = NSTextField(labelWithString: "New Comment")
+        headerLabel.translatesAutoresizingMaskIntoConstraints = false
+        headerLabel.font = theme.uiFont(size: 11, weight: .bold)
+        headerLabel.textColor = colors.accentPrimary
+        cardContainer.addSubview(headerLabel)
+
+        // Anchor text preview
         let firstLine = anchorText.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? anchorText
         let truncated = String(firstLine.prefix(30))
         let needsEllipsis = firstLine.count > 30 || anchorText.contains("\n")
-        let anchorLabel = NSTextField(labelWithString: "\"\(truncated)\(needsEllipsis ? "..." : "")\"")
+        let anchorLabel = NSTextField(labelWithString: "\"\(truncated)\(needsEllipsis ? "…" : "")\"")
         anchorLabel.translatesAutoresizingMaskIntoConstraints = false
-        anchorLabel.font = theme.uiFont(size: 11, weight: .medium)
-        anchorLabel.textColor = colors.sidebarSecondaryText
-        inputCard.addSubview(anchorLabel)
+        anchorLabel.font = theme.uiFont(size: 12, weight: .semibold)
+        anchorLabel.textColor = colors.sidebarText
+        anchorLabel.lineBreakMode = .byTruncatingTail
+        cardContainer.addSubview(anchorLabel)
 
         // Scroll view for multi-line text input
         let inputScroll = NSScrollView()
@@ -253,44 +390,98 @@ final class CommentSidebarController: NSViewController {
         inputScroll.borderType = .noBorder
         inputScroll.drawsBackground = false
 
-        let input = NSTextView()
-        input.isRichText = false
-        input.font = theme.uiFont(size: 12, weight: .regular)
-        input.textColor = colors.sidebarText
-        input.backgroundColor = .clear
+        // Create text view with proper frame - will be resized by autoresizing mask
+        let contentSize = inputScroll.contentSize
+        let input = CommentInputTextView(frame: NSRect(x: 0, y: 0, width: contentSize.width, height: contentSize.height))
+        input.onSubmit = { [weak self] in self?.finishAddingComment() }
+        input.minSize = NSSize(width: 0, height: 20)
+        input.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         input.isVerticallyResizable = true
         input.isHorizontallyResizable = false
-        input.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        input.autoresizingMask = [.width]
+        input.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         input.textContainer?.widthTracksTextView = true
+        input.isRichText = false
+        input.font = theme.uiFont(size: 13, weight: .regular)
+        input.textColor = colors.sidebarText
+        input.backgroundColor = .clear
         input.delegate = self
+        input.insertionPointColor = colors.accentPrimary
         inputScroll.documentView = input
-        inputCard.addSubview(inputScroll)
+        cardContainer.addSubview(inputScroll)
         self.inputTextView = input
 
         // Hint label
-        let hintLabel = NSTextField(labelWithString: "⌘+Enter to submit")
+        let hintLabel = NSTextField(labelWithString: "Press Enter to save • Esc to cancel")
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
         hintLabel.font = theme.uiFont(size: 10, weight: .regular)
         hintLabel.textColor = colors.sidebarSecondaryText.withAlphaComponent(0.6)
-        inputCard.addSubview(hintLabel)
+        cardContainer.addSubview(hintLabel)
 
         NSLayoutConstraint.activate([
-            anchorLabel.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 8),
-            anchorLabel.topAnchor.constraint(equalTo: inputCard.topAnchor, constant: 8),
-            anchorLabel.trailingAnchor.constraint(lessThanOrEqualTo: inputCard.trailingAnchor, constant: -8),
-            inputScroll.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 8),
-            inputScroll.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -8),
-            inputScroll.topAnchor.constraint(equalTo: anchorLabel.bottomAnchor, constant: 4),
-            inputScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
+            // Card container inside outer view
+            cardContainer.topAnchor.constraint(equalTo: inputCard.topAnchor, constant: 2),
+            cardContainer.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 2),
+            cardContainer.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -2),
+            cardContainer.bottomAnchor.constraint(equalTo: inputCard.bottomAnchor, constant: -2),
+
+            // Accent bar
+            accentBar.leadingAnchor.constraint(equalTo: cardContainer.leadingAnchor),
+            accentBar.topAnchor.constraint(equalTo: cardContainer.topAnchor),
+            accentBar.bottomAnchor.constraint(equalTo: cardContainer.bottomAnchor),
+            accentBar.widthAnchor.constraint(equalToConstant: 3),
+
+            // Header
+            headerLabel.leadingAnchor.constraint(equalTo: accentBar.trailingAnchor, constant: 12),
+            headerLabel.topAnchor.constraint(equalTo: cardContainer.topAnchor, constant: 12),
+
+            // Anchor label
+            anchorLabel.leadingAnchor.constraint(equalTo: accentBar.trailingAnchor, constant: 12),
+            anchorLabel.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 4),
+            anchorLabel.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor, constant: -12),
+
+            // Input scroll
+            inputScroll.leadingAnchor.constraint(equalTo: accentBar.trailingAnchor, constant: 12),
+            inputScroll.trailingAnchor.constraint(equalTo: cardContainer.trailingAnchor, constant: -12),
+            inputScroll.topAnchor.constraint(equalTo: anchorLabel.bottomAnchor, constant: 8),
+            inputScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             inputScroll.heightAnchor.constraint(lessThanOrEqualToConstant: 100),
-            hintLabel.topAnchor.constraint(equalTo: inputScroll.bottomAnchor, constant: 4),
-            hintLabel.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -8),
-            hintLabel.bottomAnchor.constraint(equalTo: inputCard.bottomAnchor, constant: -6),
+
+            // Hint label
+            hintLabel.leadingAnchor.constraint(equalTo: accentBar.trailingAnchor, constant: 12),
+            hintLabel.topAnchor.constraint(equalTo: inputScroll.bottomAnchor, constant: 6),
+            hintLabel.bottomAnchor.constraint(equalTo: cardContainer.bottomAnchor, constant: -10),
         ])
 
-        stackView.insertArrangedSubview(inputCard, at: 0)
+        // Calculate correct insertion position based on anchor text position in document
+        let insertionIndex = calculateInsertionIndex(for: anchorText)
+        stackView.insertArrangedSubview(inputCard, at: insertionIndex)
         inputCard.widthAnchor.constraint(equalTo: stackView.widthAnchor, constant: -16).isActive = true
         view.window?.makeFirstResponder(input)
+
+        // Fix text view size after layout
+        DispatchQueue.main.async {
+            let scrollContentSize = inputScroll.contentSize
+            input.frame = NSRect(x: 0, y: 0, width: scrollContentSize.width, height: scrollContentSize.height)
+            input.textContainer?.containerSize = NSSize(width: scrollContentSize.width, height: CGFloat.greatestFiniteMagnitude)
+        }
+    }
+
+    /// Calculate where to insert a new comment card based on document position
+    private func calculateInsertionIndex(for anchorText: String) -> Int {
+        guard let newPosition = documentText.range(of: anchorText)?.lowerBound else {
+            return 0 // If anchor not found, insert at top
+        }
+
+        let unresolvedComments = commentStore.unresolvedComments(sortedBy: documentText)
+        for (index, comment) in unresolvedComments.enumerated() {
+            if let existingPosition = commentStore.findAnchorRange(for: comment, in: documentText)?.lowerBound {
+                if newPosition < existingPosition {
+                    return index
+                }
+            }
+        }
+        return unresolvedComments.count // Insert at end if it comes after all existing
     }
 
     private func finishAddingComment() {
@@ -357,14 +548,15 @@ final class CommentSidebarController: NSViewController {
 
 extension CommentSidebarController: NSTextViewDelegate {
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        // Cmd+Enter to submit
+        // Enter to submit, Shift+Enter for newline
         if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-            if NSApp.currentEvent?.modifierFlags.contains(.command) == true {
-                finishAddingComment()
-                return true
+            if let event = NSApp.currentEvent, event.modifierFlags.contains(.shift) {
+                // Shift+Enter: allow default newline behavior
+                return false
             }
-            // Allow regular Enter for newlines
-            return false
+            // Plain Enter: submit
+            finishAddingComment()
+            return true
         }
         // Escape to cancel
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {

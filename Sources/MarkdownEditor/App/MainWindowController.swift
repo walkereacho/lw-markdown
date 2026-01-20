@@ -353,8 +353,10 @@ final class MainWindowController: NSWindowController {
         guard let pane = editorViewController.currentPane,
               let range = pane.textView.string.range(of: comment.anchorText) else { return }
         let nsRange = NSRange(range, in: pane.textView.string)
+
+        // Set selection to make paragraph active (shows raw markdown)
+        pane.textView.setSelectedRange(nsRange)
         pane.textView.scrollRangeToVisible(nsRange)
-        pane.textView.showFindIndicator(for: nsRange)
     }
 
     // MARK: - Window Title
