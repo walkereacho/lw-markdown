@@ -160,8 +160,8 @@ final class PaneController: NSObject {
         textView.autoresizingMask = [.width]
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
-        // Allow text view to grow to fit content
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        // Allow text view to grow vertically, but constrain width for text wrapping
+        textView.maxSize = NSSize(width: textView.frame.width, height: CGFloat.greatestFiniteMagnitude)
         textView.minSize = NSSize(width: 0, height: 0)
         textView.textContainerInset = NSSize(width: 20, height: 20)
 

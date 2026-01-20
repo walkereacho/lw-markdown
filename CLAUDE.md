@@ -99,17 +99,97 @@ Each markdown element type has different rendering needs handled by dedicated me
 | Element | Active (cursor present) | Inactive |
 |---------|------------------------|----------|
 | **Headings** | Show `#` muted, heading font | Hide `#`, heading font |
-| **Bullets** | Show `* ` as typed | Transform to `•` glyph (future) |
-| **Blockquotes** | Show `>` muted | Visual treatment (future) |
-| **Code blocks** | Syntax visible | Syntax highlighting (future) |
+| **Bold/Italic** | Formatted text + muted `*` | Formatted text, `*` hidden |
+| **Inline code** | Code font + muted `` ` `` + background | Code font + background, `` ` `` hidden |
+| **Bullets** | Show `- ` muted | Show `•` glyph |
+| **Blockquotes** | Show `>` muted, italic font | Hide `>`, italic font + bar |
+| **Code blocks** | Syntax highlighted (same as inactive) | Syntax highlighted |
+| **Fence lines** | Show ```` ``` ```` muted | Hide ```` ``` ```` |
 
 **Key implementation details:**
-- Storage has element-specific fonts (headings) → TextKit 2 calculates correct cursor metrics
-- Custom `draw()` methods handle visual presentation:
-  - `drawActiveHeading()` - syntax visible but muted
-  - `drawInactiveHeading()` - syntax hidden, content only
-- Heading detection triggers immediately after `# ` (space), not waiting for content
+- Storage has element-specific fonts → TextKit 2 calculates correct cursor metrics
+- Custom `draw()` methods handle visual presentation
+- Inline formatting renders live in active paragraphs (not just when inactive)
+- Code block content is consistent regardless of cursor position
 - `NSTextParagraph.attributedString.string` includes trailing newline; must trim before parsing
+
+## Cursor Positioning & Font Management
+
+**Critical Rule:** TextKit 2 calculates cursor position from font attributes in `NSTextStorage`, NOT from custom `draw()` rendering. Storage fonts must match rendering fonts exactly.
+
+### Font Application Timing
+
+Apply fonts in `textStorage(_:willProcessEditing:...)` BEFORE TextKit 2 creates layout fragments:
+
+```swift
+// In DocumentModel - NSTextStorageDelegate
+func textStorage(_ textStorage: NSTextStorage, willProcessEditing...) {
+    // Detect paragraph type (heading, code block, blockquote, list)
+    // Apply appropriate font to storage
+    // This ensures correct cursor metrics from the start
+}
+```
+
+### Syntax Character Rendering
+
+When showing syntax characters (`*`, `>`, `-`, `` ` ``) in active paragraphs:
+- **Only change COLOR**, not font
+- Changing font causes cursor mismatch (storage has content font, rendering has different font)
+
+```swift
+// WRONG - causes cursor offset
+attributedString.addAttributes(theme.syntaxCharacterAttributes, range: nsRange)
+
+// CORRECT - only change color
+attributedString.addAttribute(.foregroundColor, value: theme.syntaxCharacterColor, range: nsRange)
+```
+
+### Document Load Initialization
+
+Fonts must be applied to ALL paragraphs on document load, not just when edited:
+
+1. Build `BlockContext` FIRST (to detect code blocks)
+2. Then apply fonts based on paragraph type
+3. Order matters: block context → fonts → layout
+
+```swift
+private func initializeAfterContentLoad() {
+    updateBlockContextFull()      // 1. Detect code blocks
+    applyFontsToAllParagraphs()   // 2. Apply fonts
+    // ... rest of init
+}
+```
+
+### Code Block Rendering
+
+- Content lines render the SAME regardless of active/inactive state
+- Only fence lines (```` ``` ````) change based on cursor position
+- When using Highlightr, override its font with `theme.codeFont` to match storage
+
+```swift
+let mutableHighlighted = NSMutableAttributedString(attributedString: highlighted)
+mutableHighlighted.addAttribute(.font, value: theme.codeFont,
+    range: NSRange(location: 0, length: mutableHighlighted.length))
+```
+
+### Inline Code Backgrounds
+
+Draw backgrounds manually for full line height (attributed string `.backgroundColor` only covers text height):
+
+```swift
+// Draw rounded rect background BEFORE drawing text
+let bgRect = CGRect(x: point.x + xOffset, y: point.y, width: codeWidth, height: lineHeight)
+let path = CGPath(roundedRect: bgRect, cornerWidth: 3, cornerHeight: 3, transform: nil)
+context.addPath(path)
+context.fillPath()
+```
+
+### Live Inline Formatting
+
+Active paragraphs show formatted text (bold, italic) WITH syntax visible:
+- Apply formatting attributes to content ranges
+- Apply muted color to syntax ranges
+- Keeps visual feedback while editing
 
 ## Test Fixtures
 

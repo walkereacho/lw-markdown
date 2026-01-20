@@ -63,6 +63,9 @@ final class EditorViewController: NSViewController {
         // Set as scroll view's document view
         scrollView.documentView = paneController?.textView
 
+        // Configure text view width for wrapping within scroll view
+        configureTextViewForWrapping()
+
         // Invalidate layout and force full redraw to clear any rendering artifacts
         if let pane = paneController {
             pane.layoutManager.ensureLayout(for: pane.layoutManager.documentRange)
@@ -71,6 +74,56 @@ final class EditorViewController: NSViewController {
 
         // Make text view first responder
         view.window?.makeFirstResponder(paneController?.textView)
+    }
+
+    /// Configure text view to wrap text within the scroll view's visible width.
+    private func configureTextViewForWrapping() {
+        guard let textView = paneController?.textView else { return }
+
+        // Get the visible width from the scroll view's clip view
+        let clipView = scrollView.contentView
+        let visibleWidth = clipView.bounds.width
+
+        // Set text view frame to match visible width
+        textView.frame.size.width = visibleWidth
+
+        // Set text container size explicitly for wrapping
+        textView.textContainer?.size = NSSize(
+            width: visibleWidth - textView.textContainerInset.width * 2,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+
+        // Observe clip view bounds changes to update text container on resize
+        clipView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(clipViewBoundsDidChange),
+            name: NSView.boundsDidChangeNotification,
+            object: clipView
+        )
+
+        // Also observe frame changes (for window resize)
+        clipView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(clipViewBoundsDidChange),
+            name: NSView.frameDidChangeNotification,
+            object: clipView
+        )
+    }
+
+    @objc private func clipViewBoundsDidChange(_ notification: Notification) {
+        guard let textView = paneController?.textView else { return }
+
+        let clipView = scrollView.contentView
+        let visibleWidth = clipView.bounds.width
+
+        // Update text view and container width
+        textView.frame.size.width = visibleWidth
+        textView.textContainer?.size = NSSize(
+            width: visibleWidth - textView.textContainerInset.width * 2,
+            height: CGFloat.greatestFiniteMagnitude
+        )
     }
 
     // MARK: - Cursor Positioning (for testing)

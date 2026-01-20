@@ -231,8 +231,21 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             return
         }
 
-        // Non-heading/non-blockquote/non-list: use existing logic
-        if isActiveParagraph {
+        // Non-heading/non-blockquote/non-list: check if we need custom drawing
+        // For plain text with no inline formatting, use super.draw() for proper wrapping
+        let hasInlineFormatting = tokens.contains { token in
+            switch token.element {
+            case .bold, .italic, .boldItalic, .inlineCode, .link:
+                return true
+            default:
+                return false
+            }
+        }
+
+        if !hasInlineFormatting {
+            // Plain text - use TextKit 2's native drawing for proper wrapping
+            super.draw(at: point, in: context)
+        } else if isActiveParagraph {
             drawRawMarkdown(text: text, at: point, in: context)
         } else {
             drawFormattedMarkdown(text: text, at: point, in: context)
