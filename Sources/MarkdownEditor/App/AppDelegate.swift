@@ -103,6 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(NSMenuItem.separator())
+        let addCommentItem = NSMenuItem(title: "Add Comment", action: #selector(addComment(_:)), keyEquivalent: "m")
+        addCommentItem.keyEquivalentModifierMask = [.option, .command]
+        editMenu.addItem(addCommentItem)
+        editMenu.addItem(withTitle: "Toggle Comment Sidebar", action: #selector(toggleCommentSidebar(_:)), keyEquivalent: "")
 
         NSApplication.shared.mainMenu = mainMenu
     }
@@ -127,5 +132,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openWorkspaceAction(_ sender: Any?) {
         mainWindowController?.openWorkspace()
+    }
+
+    @objc func addComment(_ sender: Any?) {
+        mainWindowController?.addComment()
+    }
+
+    @objc private func toggleCommentSidebar(_ sender: Any?) {
+        mainWindowController?.toggleCommentSidebar()
     }
 }
