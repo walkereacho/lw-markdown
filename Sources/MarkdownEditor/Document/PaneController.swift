@@ -42,6 +42,9 @@ final class PaneController: NSObject {
     private var cursorDebounceTimer: DispatchWorkItem?
     private let cursorDebounceInterval: TimeInterval = 0.016  // ~1 frame at 60fps
 
+    /// Theme change observer token.
+    private var themeObserver: NSObjectProtocol?
+
     /// Reentrancy guard for heading font application.
     private var isApplyingHeadingFonts = false
 
@@ -176,8 +179,18 @@ final class PaneController: NSObject {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
         textView.textColor = .textColor
-        textView.backgroundColor = .textBackgroundColor
         textView.allowsUndo = true
+
+        // Apply initial theme colors and observe changes
+        applyThemeColors()
+        themeObserver = ThemeManager.shared.observeChanges { [weak self] in
+            self?.applyThemeColors()
+        }
+    }
+
+    private func applyThemeColors() {
+        let colors = ThemeManager.shared.colors
+        textView.backgroundColor = colors.shellBackground
     }
 
     // MARK: - Token Provider
