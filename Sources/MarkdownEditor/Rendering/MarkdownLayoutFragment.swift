@@ -806,6 +806,9 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             baseAttributes = theme.bodyAttributes
         }
 
+        // Draw inline code backgrounds first (full line height)
+        drawInlineCodeBackgrounds(text: text, baseAttributes: baseAttributes, at: point, in: context)
+
         let attributedString = NSMutableAttributedString(
             string: text,
             attributes: baseAttributes
@@ -817,6 +820,12 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             switch token.element {
             case .heading, .blockquote, .unorderedListItem, .orderedListItem,
                  .fencedCodeBlock, .indentedCodeBlock, .horizontalRule, .text:
+                continue
+            case .inlineCode:
+                // For inline code, apply font but NOT background (we draw it manually)
+                guard token.contentRange.upperBound <= text.count else { continue }
+                let contentNSRange = NSRange(location: token.contentRange.lowerBound, length: token.contentRange.count)
+                attributedString.addAttribute(.font, value: theme.codeFont, range: contentNSRange)
                 continue
             default:
                 break
@@ -840,6 +849,73 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
 
         drawAttributedString(attributedString, at: point, in: context)
+    }
+
+    /// Draw full-height background rectangles for inline code spans.
+    private func drawInlineCodeBackgrounds(text: String, baseAttributes: [NSAttributedString.Key: Any], at point: CGPoint, in context: CGContext) {
+        let inlineCodeTokens = tokens.filter {
+            if case .inlineCode = $0.element { return true }
+            return false
+        }
+
+        guard !inlineCodeTokens.isEmpty else { return }
+
+        // Get line height from base font
+        let baseFont = baseAttributes[.font] as? NSFont ?? theme.bodyFont
+        let lineHeight = baseFont.ascender - baseFont.descender + baseFont.leading
+        let verticalPadding: CGFloat = 2.0
+        let horizontalPadding: CGFloat = 2.0
+        let cornerRadius: CGFloat = 3.0
+
+        context.saveGState()
+        context.setFillColor(theme.codeBackgroundColor.cgColor)
+
+        for token in inlineCodeTokens {
+            // Get full range including backticks
+            guard let firstSyntax = token.syntaxRanges.first,
+                  let lastSyntax = token.syntaxRanges.last else { continue }
+            let fullStart = firstSyntax.lowerBound
+            let fullEnd = lastSyntax.upperBound
+            guard fullEnd <= text.count else { continue }
+
+            // Measure text width up to the start
+            let textBefore = substring(of: text, from: 0, to: fullStart)
+            let xOffset = measureWidth(textBefore, attributes: baseAttributes)
+
+            // Measure the inline code span width (including backticks)
+            let codeText = substring(of: text, from: fullStart, to: fullEnd)
+            // Use mixed attributes: backticks in base font, content in code font
+            let codeWidth = measureInlineCodeWidth(codeText, token: token, baseAttributes: baseAttributes)
+
+            // Draw rounded rectangle background
+            let bgRect = CGRect(
+                x: point.x + xOffset - horizontalPadding,
+                y: point.y - verticalPadding,
+                width: codeWidth + horizontalPadding * 2,
+                height: lineHeight + verticalPadding * 2
+            )
+            let path = CGPath(roundedRect: bgRect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+            context.addPath(path)
+            context.fillPath()
+        }
+
+        context.restoreGState()
+    }
+
+    /// Measure width of inline code span with mixed fonts (backticks in base font, content in code font).
+    private func measureInlineCodeWidth(_ text: String, token: MarkdownToken, baseAttributes: [NSAttributedString.Key: Any]) -> CGFloat {
+        let attrString = NSMutableAttributedString(string: text, attributes: baseAttributes)
+
+        // Apply code font to content range (adjusted for substring offset)
+        let contentStart = token.contentRange.lowerBound - (token.syntaxRanges.first?.lowerBound ?? 0)
+        let contentLength = token.contentRange.count
+        if contentStart >= 0 && contentStart + contentLength <= text.count {
+            let contentRange = NSRange(location: contentStart, length: contentLength)
+            attrString.addAttribute(.font, value: theme.codeFont, range: contentRange)
+        }
+
+        let line = CTLineCreateWithAttributedString(attrString)
+        return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
     }
 
     // MARK: - Formatted Markdown Drawing (Inactive Paragraph)
@@ -883,10 +959,17 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             let contentText = substring(of: text, from: token.contentRange.lowerBound, to: token.contentRange.upperBound)
             if !contentText.isEmpty {
                 let attrs = attributesForElement(token.element)
+                let isInlineCode: Bool
+                if case .inlineCode = token.element {
+                    isInlineCode = true
+                } else {
+                    isInlineCode = false
+                }
                 runs.append(DrawingRun(
                     text: contentText,
                     attributes: attrs,
-                    xOffset: currentX
+                    xOffset: currentX,
+                    isInlineCode: isInlineCode
                 ))
                 currentX += measureWidth(contentText, attributes: attrs)
             }
@@ -909,7 +992,32 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             }
         }
 
-        // Execute drawing
+        // Draw inline code backgrounds first (full line height)
+        let baseFont = theme.bodyFont
+        let lineHeight = baseFont.ascender - baseFont.descender + baseFont.leading
+        let verticalPadding: CGFloat = 2.0
+        let horizontalPadding: CGFloat = 2.0
+        let cornerRadius: CGFloat = 3.0
+
+        context.saveGState()
+        context.setFillColor(theme.codeBackgroundColor.cgColor)
+
+        for run in runs where run.isInlineCode {
+            let runWidth = measureWidth(run.text, attributes: run.attributes)
+            let bgRect = CGRect(
+                x: point.x + run.xOffset - horizontalPadding,
+                y: point.y - verticalPadding,
+                width: runWidth + horizontalPadding * 2,
+                height: lineHeight + verticalPadding * 2
+            )
+            let path = CGPath(roundedRect: bgRect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+            context.addPath(path)
+            context.fillPath()
+        }
+
+        context.restoreGState()
+
+        // Execute text drawing
         for run in runs {
             let runPoint = CGPoint(x: point.x + run.xOffset, y: point.y)
             let attrString = NSAttributedString(string: run.text, attributes: run.attributes)
@@ -923,6 +1031,14 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         let text: String
         let attributes: [NSAttributedString.Key: Any]
         let xOffset: CGFloat
+        let isInlineCode: Bool
+
+        init(text: String, attributes: [NSAttributedString.Key: Any], xOffset: CGFloat, isInlineCode: Bool = false) {
+            self.text = text
+            self.attributes = attributes
+            self.xOffset = xOffset
+            self.isInlineCode = isInlineCode
+        }
     }
 
     private func drawAttributedString(_ string: NSAttributedString, at point: CGPoint, in context: CGContext) {

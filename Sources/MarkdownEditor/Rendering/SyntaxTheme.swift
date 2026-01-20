@@ -51,10 +51,10 @@ struct SyntaxTheme {
     }
 
     var inlineCodeAttributes: [NSAttributedString.Key: Any] {
+        // Note: backgroundColor is drawn manually for full line height
         [
             .font: codeFont,
-            .foregroundColor: bodyColor,
-            .backgroundColor: codeBackgroundColor
+            .foregroundColor: bodyColor
         ]
     }
 
@@ -118,7 +118,7 @@ struct SyntaxTheme {
             bodyColor: .textColor,
             headingColor: .textColor,
             linkColor: .linkColor,
-            codeBackgroundColor: .quaternaryLabelColor,
+            codeBackgroundColor: NSColor.gray.withAlphaComponent(0.2),
             syntaxCharacterColor: .tertiaryLabelColor,
             blockquoteColor: .secondaryLabelColor,
             highlightThemeLight: "github",
