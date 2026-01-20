@@ -288,15 +288,30 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     }
 
     /// Draw inactive paragraph with formatting and hidden syntax, with text wrapping.
-    /// Since syntax is hidden, we calculate our own line breaks on the display text.
+    /// For plain text (no syntax hiding), uses TextKit 2's line fragments for consistent wrapping.
+    /// For text with hidden syntax, recalculates line breaks since display text differs from source.
     private func drawFormattedMarkdownWrapped(text: String, at point: CGPoint, in context: CGContext) {
         // Build the display string with syntax hidden and formatting applied
         let (displayString, _) = buildFormattedDisplayString(text: text)
 
-        // Get available width for wrapping
+        // Check if display text length matches source - if so, use TextKit 2's line fragments
+        // for consistent line breaks with active mode
+        if displayString.length == text.count {
+            // No syntax was hidden - use same line fragments as active mode
+            drawLineFragments(attributedString: displayString, at: point, in: context)
+            return
+        }
+
+        // Syntax was hidden, so display text is shorter - need to recalculate line breaks
+        // Get available width matching TextKit 2's layout
         let availableWidth: CGFloat
         if let textContainer = paneController?.textContainer {
-            availableWidth = textContainer.size.width - 40  // Account for insets
+            // Use the actual line fragment rect width from TextKit 2 for consistency
+            if let firstFragment = textLineFragments.first {
+                availableWidth = firstFragment.typographicBounds.width
+            } else {
+                availableWidth = textContainer.size.width - (textContainer.lineFragmentPadding * 2)
+            }
         } else {
             availableWidth = 760
         }
@@ -329,10 +344,15 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         for (index, line) in lines.enumerated() {
             var ascent: CGFloat = 0
             var descent: CGFloat = 0
-            CTLineGetTypographicBounds(line, &ascent, &descent, nil)
+            var leading: CGFloat = 0
+            CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
 
-            // Calculate y position - origins are from bottom of frame
-            let lineY = point.y + (fitSize.height - origins[index].y) - descent
+            // Calculate y position to match drawAttributedString positioning (point.y + ascent)
+            // This ensures active and inactive paragraphs render at the same vertical position.
+            // For first line: point.y + ascent
+            // For subsequent lines: add line height for each previous line
+            let lineHeight = ascent + descent + leading
+            let lineY = point.y + ascent + (CGFloat(index) * lineHeight)
             context.textPosition = CGPoint(x: point.x + origins[index].x, y: lineY)
             CTLineDraw(line, context)
         }
@@ -454,7 +474,8 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
                     let startX = CTLineGetOffsetForStringIndex(line, lineRange.location + relativeStart, nil)
                     let endX = CTLineGetOffsetForStringIndex(line, lineRange.location + relativeEnd, nil)
 
-                    let lineY = point.y + (fitHeight - origins[lineIndex].y) - lineHeight
+                    // Calculate y position to match text drawing (top of line)
+                    let lineY = point.y + (CGFloat(lineIndex) * lineHeight)
 
                     let bgRect = CGRect(
                         x: point.x + startX - horizontalPadding,
@@ -657,16 +678,19 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
     }
 
+    // MARK: - List Item Drawing Constants
+
+    /// Total indent for list items - must match DocumentModel.listIndent
+    /// Applied via paragraph style in storage for cursor positioning.
+    private let listIndent: CGFloat = 20.0
+
     // MARK: - Unordered List Item Drawing
 
     /// Draw active unordered list item with syntax visible but muted.
-    /// Shows the -, *, or + marker in muted color with proper indentation.
+    /// Shows the -, *, or + marker in muted color.
     private func drawActiveUnorderedListItem(text: String, token: MarkdownToken, at point: CGPoint, in context: CGContext) {
-        let depth = token.nestingDepth
-        let indentPerLevel: CGFloat = 20.0
-        let totalIndent = CGFloat(depth - 1) * indentPerLevel  // depth 1 = no indent
-
         // Draw the entire line with body styling
+        // The text includes leading whitespace which provides visual nesting
         let attributedString = NSMutableAttributedString(
             string: text,
             attributes: theme.bodyAttributes
@@ -680,26 +704,29 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             attributedString.addAttribute(.foregroundColor, value: theme.syntaxCharacterColor, range: nsRange)
         }
 
-        // Draw at indented position
-        let indentedPoint = CGPoint(x: point.x + totalIndent, y: point.y)
-        drawAttributedString(attributedString, at: indentedPoint, in: context)
+        // Draw at point - paragraph style handles indent for cursor alignment
+        drawAttributedString(attributedString, at: point, in: context)
     }
 
     /// Draw inactive unordered list item with bullet glyph.
     /// Hides the -, *, + marker and replaces with bullet (•) character.
     /// Handles inline formatting within the list item content.
+    /// NOTE: Position bullet and content based on actual text measurements to match active mode.
     private func drawInactiveUnorderedListItem(text: String, token: MarkdownToken, at point: CGPoint, in context: CGContext) {
-        let depth = token.nestingDepth
         let contentStart = token.contentRange.lowerBound
 
-        // Configuration for indentation
-        let indentPerLevel: CGFloat = 20.0
-        let bulletWidth: CGFloat = 16.0  // Space for bullet glyph
-        let totalIndent = CGFloat(depth - 1) * indentPerLevel  // depth 1 = no indent
+        // Measure where the marker starts (after leading whitespace)
+        let markerStart = token.syntaxRanges.first?.lowerBound ?? 0
+        let leadingText = substring(of: text, from: 0, to: markerStart)
+        let leadingWidth = measureWidth(leadingText, attributes: theme.bodyAttributes)
 
-        // Draw bullet glyph
+        // Measure where content starts (after marker)
+        let prefixText = substring(of: text, from: 0, to: contentStart)
+        let prefixWidth = measureWidth(prefixText, attributes: theme.bodyAttributes)
+
+        // Draw bullet at marker position (where "-" would be in active mode)
         let bulletString = NSAttributedString(string: "•", attributes: theme.bodyAttributes)
-        let bulletPoint = CGPoint(x: point.x + totalIndent, y: point.y)
+        let bulletPoint = CGPoint(x: point.x + leadingWidth, y: point.y)
         drawAttributedString(bulletString, at: bulletPoint, in: context)
 
         // Get content text (without the marker prefix)
@@ -711,8 +738,8 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             return t.contentRange.lowerBound >= contentStart
         }
 
-        // Calculate content position (after bullet)
-        let contentPoint = CGPoint(x: point.x + totalIndent + bulletWidth, y: point.y)
+        // Calculate content position to match active mode
+        let contentPoint = CGPoint(x: point.x + prefixWidth, y: point.y)
 
         // If no inline tokens, draw plain text
         if inlineTokens.isEmpty {
@@ -788,13 +815,10 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     // MARK: - Ordered List Item Drawing
 
     /// Draw active ordered list item with syntax visible but muted.
-    /// Shows the 1., 2., etc. marker in muted color with proper indentation.
+    /// Shows the 1., 2., etc. marker in muted color.
     private func drawActiveOrderedListItem(text: String, token: MarkdownToken, number: Int, at point: CGPoint, in context: CGContext) {
-        let depth = token.nestingDepth
-        let indentPerLevel: CGFloat = 18.0
-        let totalIndent = CGFloat(depth - 1) * indentPerLevel  // depth 1 = no indent
-
         // Draw the entire line with body styling
+        // The text includes leading whitespace which provides visual nesting
         let attributedString = NSMutableAttributedString(
             string: text,
             attributes: theme.bodyAttributes
@@ -808,32 +832,26 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             attributedString.addAttribute(.foregroundColor, value: theme.syntaxCharacterColor, range: nsRange)
         }
 
-        // Draw at indented position
-        let indentedPoint = CGPoint(x: point.x + totalIndent, y: point.y)
-        drawAttributedString(attributedString, at: indentedPoint, in: context)
+        // Draw at point - paragraph style handles indent for cursor alignment
+        drawAttributedString(attributedString, at: point, in: context)
     }
 
     /// Draw inactive ordered list item with formatted number.
     /// Hides the "1." syntax and replaces with a cleanly rendered number.
-    /// Numbers are right-aligned so single and double digits align properly.
     /// Handles inline formatting within the list item content.
+    /// NOTE: Position content based on number width + gap to match unordered list spacing.
     private func drawInactiveOrderedListItem(text: String, token: MarkdownToken, number: Int, at point: CGPoint, in context: CGContext) {
-        let depth = token.nestingDepth
         let contentStart = token.contentRange.lowerBound
 
-        // Configuration for indentation
-        let indentPerLevel: CGFloat = 18.0
-        let numberColumnWidth: CGFloat = 20.0  // Fixed width for numbers (allows right alignment)
-        let numberRightPadding: CGFloat = 4.0  // Space between number and content
-        let totalIndent = CGFloat(depth - 1) * indentPerLevel  // depth 1 = no indent
+        // Measure where the marker starts (after leading whitespace)
+        let markerStart = token.syntaxRanges.first?.lowerBound ?? 0
+        let leadingText = substring(of: text, from: 0, to: markerStart)
+        let leadingWidth = measureWidth(leadingText, attributes: theme.bodyAttributes)
 
-        // Draw the number with right alignment
+        // Draw the number at marker position (where "1." would be in active mode)
         let numberString = "\(number)."
         let numberAttrString = NSAttributedString(string: numberString, attributes: theme.bodyAttributes)
-        let numberWidth = measureWidth(numberString, attributes: theme.bodyAttributes)
-        // Right-align the number within the column
-        let numberX = point.x + totalIndent + (numberColumnWidth - numberWidth)
-        let numberPoint = CGPoint(x: numberX, y: point.y)
+        let numberPoint = CGPoint(x: point.x + leadingWidth, y: point.y)
         drawAttributedString(numberAttrString, at: numberPoint, in: context)
 
         // Get content text (without the marker prefix)
@@ -845,8 +863,10 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             return t.contentRange.lowerBound >= contentStart
         }
 
-        // Calculate content position (after number column)
-        let contentPoint = CGPoint(x: point.x + totalIndent + numberColumnWidth + numberRightPadding, y: point.y)
+        // Calculate content position: number width + small gap (matches unordered bullet spacing feel)
+        let numberWidth = measureWidth(numberString, attributes: theme.bodyAttributes)
+        let gapAfterNumber: CGFloat = 4.0  // Consistent gap, matches unordered visual spacing
+        let contentPoint = CGPoint(x: point.x + leadingWidth + numberWidth + gapAfterNumber, y: point.y)
 
         // If no inline tokens, draw plain text
         if inlineTokens.isEmpty {
