@@ -39,6 +39,12 @@ final class WorkspaceManager: WorkspaceProviding {
         fileWatcher?.onFileChanged = { [weak self] changedURL in
             self?.handleFileChange(changedURL)
         }
+        fileWatcher?.onFileCreated = { [weak self] changedURL in
+            self?.handleFileChange(changedURL)
+        }
+        fileWatcher?.onFileDeleted = { [weak self] changedURL in
+            self?.handleFileChange(changedURL)
+        }
         fileWatcher?.watchWorkspace(at: url)
     }
 
@@ -56,7 +62,13 @@ final class WorkspaceManager: WorkspaceProviding {
             return cached
         }
 
-        cachedTree = buildFileTree(at: root)
+        // Build filtered tree; if root has no markdown files, return empty root node
+        if let tree = buildFileTree(at: root) {
+            cachedTree = tree
+        } else {
+            // Return root with empty children if no markdown files found
+            cachedTree = FileTreeNode(url: root, isDirectory: true, children: [])
+        }
         return cachedTree
     }
 
@@ -67,6 +79,8 @@ final class WorkspaceManager: WorkspaceProviding {
         let lowercasePattern = pattern.lowercased()
 
         enumerateFiles(in: root) { url in
+            // Only include markdown files
+            guard url.pathExtension.lowercased() == "md" else { return }
             if url.lastPathComponent.lowercased().contains(lowercasePattern) {
                 matches.append(url)
             }
@@ -77,10 +91,8 @@ final class WorkspaceManager: WorkspaceProviding {
 
     // MARK: - Private
 
-    private func buildFileTree(at url: URL) -> FileTreeNode {
+    private func buildFileTree(at url: URL) -> FileTreeNode? {
         let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-
-        var children: [FileTreeNode]?
 
         if isDirectory {
             let contents = (try? FileManager.default.contentsOfDirectory(
@@ -89,12 +101,20 @@ final class WorkspaceManager: WorkspaceProviding {
                 options: [.skipsHiddenFiles]
             )) ?? []
 
-            children = contents
+            let children = contents
                 .sorted { $0.lastPathComponent < $1.lastPathComponent }
-                .map { buildFileTree(at: $0) }
-        }
+                .compactMap { buildFileTree(at: $0) }
 
-        return FileTreeNode(url: url, isDirectory: isDirectory, children: children)
+            // Only include directories that contain markdown files
+            guard !children.isEmpty else { return nil }
+
+            return FileTreeNode(url: url, isDirectory: true, children: children)
+        } else {
+            // Only include markdown files
+            guard url.pathExtension.lowercased() == "md" else { return nil }
+
+            return FileTreeNode(url: url, isDirectory: false, children: nil)
+        }
     }
 
     private func enumerateFiles(in directory: URL, handler: (URL) -> Void) {

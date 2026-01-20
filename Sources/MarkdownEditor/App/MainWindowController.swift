@@ -56,6 +56,11 @@ final class MainWindowController: NSWindowController {
         }
         self.sidebarController = sidebar
 
+        // Refresh sidebar when files change externally
+        workspaceManager.onFileChanged = { [weak self] _ in
+            self?.sidebarController?.refresh()
+        }
+
         let sidebarView = sidebar.view
         sidebarView.setFrameSize(NSSize(width: 220, height: 700))
         split.addArrangedSubview(sidebarView)
@@ -175,14 +180,20 @@ final class MainWindowController: NSWindowController {
     func openDocument() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.init(filenameExtension: "md")!]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
 
         panel.beginSheetModal(for: window!) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
-            do {
-                try self?.openFile(at: url)
-            } catch {
-                self?.showError(error)
+            if url.hasDirectoryPath {
+                self?.openWorkspace(at: url)
+            } else {
+                do {
+                    try self?.openFile(at: url)
+                } catch {
+                    self?.showError(error)
+                }
             }
         }
     }
