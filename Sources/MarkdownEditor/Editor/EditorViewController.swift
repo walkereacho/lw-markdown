@@ -10,6 +10,9 @@ final class EditorViewController: NSViewController {
     /// Current pane controller.
     private(set) var paneController: PaneController?
 
+    /// Alias for paneController (for API consistency).
+    var currentPane: PaneController? { paneController }
+
     /// Scroll view containing the text view.
     private var scrollView: NSScrollView!
 

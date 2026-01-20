@@ -20,6 +20,15 @@ final class MainWindowController: NSWindowController {
     /// Editor view controller.
     private(set) var editorViewController: EditorViewController!
 
+    /// Comment sidebar controller.
+    private(set) var commentSidebarController: CommentSidebarController?
+
+    /// Inner split view for editor + comment sidebar.
+    private var editorSplitView: NSSplitView?
+
+    /// Whether comment sidebar is visible.
+    private(set) var isCommentSidebarVisible = false
+
     /// Theme observer.
     private var themeObserver: NSObjectProtocol?
 
@@ -76,7 +85,7 @@ final class MainWindowController: NSWindowController {
         sidebarView.setFrameSize(NSSize(width: 220, height: 700))
         split.addArrangedSubview(sidebarView)
 
-        // Editor area (tab bar + editor)
+        // Editor area (tab bar + inner split for editor/comments)
         let editorArea = NSView()
         editorArea.autoresizingMask = [.width, .height]
         editorArea.wantsLayer = true
@@ -88,11 +97,33 @@ final class MainWindowController: NSWindowController {
         self.tabBarView = tabBar
         editorArea.addSubview(tabBar)
 
+        // Inner split view for editor + comment sidebar
+        let innerSplit = NSSplitView()
+        innerSplit.isVertical = true
+        innerSplit.dividerStyle = .thin
+        innerSplit.translatesAutoresizingMaskIntoConstraints = false
+        innerSplit.delegate = self
+        self.editorSplitView = innerSplit
+        editorArea.addSubview(innerSplit)
+
         // Editor
         editorViewController = EditorViewController()
         let editorView = editorViewController.view
         editorView.translatesAutoresizingMaskIntoConstraints = false
-        editorArea.addSubview(editorView)
+        innerSplit.addArrangedSubview(editorView)
+
+        // Comment sidebar controller (not added to split yet)
+        let commentSidebar = CommentSidebarController()
+        commentSidebar.onCommentStoreChanged = { [weak self] store in
+            self?.saveCommentStore(store)
+        }
+        commentSidebar.onCommentClicked = { [weak self] comment in
+            self?.scrollToComment(comment)
+        }
+        commentSidebar.onClose = { [weak self] in
+            self?.hideCommentSidebar()
+        }
+        self.commentSidebarController = commentSidebar
 
         NSLayoutConstraint.activate([
             tabBar.topAnchor.constraint(equalTo: editorArea.topAnchor),
@@ -100,10 +131,10 @@ final class MainWindowController: NSWindowController {
             tabBar.trailingAnchor.constraint(equalTo: editorArea.trailingAnchor),
             tabBar.heightAnchor.constraint(equalToConstant: 36),
 
-            editorView.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-            editorView.leadingAnchor.constraint(equalTo: editorArea.leadingAnchor),
-            editorView.trailingAnchor.constraint(equalTo: editorArea.trailingAnchor),
-            editorView.bottomAnchor.constraint(equalTo: editorArea.bottomAnchor)
+            innerSplit.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            innerSplit.leadingAnchor.constraint(equalTo: editorArea.leadingAnchor),
+            innerSplit.trailingAnchor.constraint(equalTo: editorArea.trailingAnchor),
+            innerSplit.bottomAnchor.constraint(equalTo: editorArea.bottomAnchor)
         ])
 
         split.addArrangedSubview(editorArea)
@@ -139,12 +170,20 @@ final class MainWindowController: NSWindowController {
             self.editorViewController.loadDocument(document)
             self.tabBarView?.updateTabs()
             self.updateWindowTitle()
+            self.loadCommentsForActiveDocument()
         }
 
         // Handle close confirmation for dirty documents
         tabManager.onCloseConfirmation = { [weak self] document in
             self?.tabBarView?.rebuildTabs()
             return self?.confirmClose(document: document) ?? true
+        }
+
+        // Observe text changes to update comment sidebar
+        NotificationCenter.default.addObserver(forName: NSText.didChangeNotification, object: nil, queue: .main) { [weak self] notification in
+            guard let textView = notification.object as? NSTextView,
+                  textView === self?.editorViewController.currentPane?.textView else { return }
+            self?.commentSidebarController?.documentText = textView.string
         }
 
         // Create initial empty document so tabs are never empty
@@ -261,6 +300,63 @@ final class MainWindowController: NSWindowController {
         editorViewController.setCursorLine(line)
     }
 
+    // MARK: - Comment Sidebar
+
+    func showCommentSidebar() {
+        guard !isCommentSidebarVisible, let sidebar = commentSidebarController, let split = editorSplitView else { return }
+        sidebar.view.setFrameSize(NSSize(width: 280, height: split.bounds.height))
+        split.addArrangedSubview(sidebar.view)
+        isCommentSidebarVisible = true
+        loadCommentsForActiveDocument()
+    }
+
+    func hideCommentSidebar() {
+        guard isCommentSidebarVisible, let sidebar = commentSidebarController else { return }
+        sidebar.view.removeFromSuperview()
+        isCommentSidebarVisible = false
+    }
+
+    func toggleCommentSidebar() {
+        if isCommentSidebarVisible { hideCommentSidebar() } else { showCommentSidebar() }
+    }
+
+    func addComment() {
+        guard let pane = editorViewController.currentPane,
+              pane.textView.selectedRange().length > 0 else {
+            toggleCommentSidebar()
+            return
+        }
+        let range = pane.textView.selectedRange()
+        let selectedText = (pane.textView.string as NSString).substring(with: range)
+        if !isCommentSidebarVisible { showCommentSidebar() }
+        commentSidebarController?.beginAddingComment(anchorText: selectedText)
+    }
+
+    private func loadCommentsForActiveDocument() {
+        guard let document = tabManager.activeDocument, let url = document.filePath else {
+            commentSidebarController?.commentStore = CommentStore()
+            return
+        }
+        let store = CommentPersistence.load(for: url)
+        commentSidebarController?.commentStore = store
+        commentSidebarController?.documentText = document.fullString()
+        if !store.comments.isEmpty && !isCommentSidebarVisible { showCommentSidebar() }
+    }
+
+    private func saveCommentStore(_ store: CommentStore) {
+        guard let document = tabManager.activeDocument, let url = document.filePath else { return }
+        CommentPersistence.save(store, for: url)
+        if store.comments.isEmpty && isCommentSidebarVisible { hideCommentSidebar() }
+    }
+
+    private func scrollToComment(_ comment: Comment) {
+        guard let pane = editorViewController.currentPane,
+              let range = pane.textView.string.range(of: comment.anchorText) else { return }
+        let nsRange = NSRange(range, in: pane.textView.string)
+        pane.textView.scrollRangeToVisible(nsRange)
+        pane.textView.showFindIndicator(for: nsRange)
+    }
+
     // MARK: - Window Title
 
     private func updateWindowTitle() {
@@ -314,36 +410,75 @@ final class MainWindowController: NSWindowController {
 extension MainWindowController: NSSplitViewDelegate {
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        // Minimum sidebar width
-        return 150
+        if splitView === self.splitView {
+            // Main split: minimum file sidebar width
+            return 150
+        } else if splitView === editorSplitView {
+            // Editor split: minimum editor width
+            return 300
+        }
+        return proposedMinimumPosition
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        // Maximum sidebar width (leave at least 400px for editor)
-        return splitView.bounds.width - 400
+        if splitView === self.splitView {
+            // Main split: maximum file sidebar width (leave at least 400px for editor area)
+            return splitView.bounds.width - 400
+        } else if splitView === editorSplitView {
+            // Editor split: maximum editor width (leave at least 200px for comment sidebar)
+            return splitView.bounds.width - 200
+        }
+        return proposedMaximumPosition
     }
 
     func splitView(_ splitView: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) {
-        // Custom resize: sidebar keeps its width, editor gets the rest
-        guard splitView.subviews.count == 2 else {
+        if splitView === self.splitView {
+            // Main split: file sidebar keeps its width, editor area gets the rest
+            guard splitView.subviews.count == 2 else {
+                splitView.adjustSubviews()
+                return
+            }
+
+            let sidebarView = splitView.subviews[0]
+            let editorView = splitView.subviews[1]
+            let dividerThickness = splitView.dividerThickness
+
+            // Keep sidebar at its current width (or default 220 if too small)
+            var sidebarWidth = sidebarView.frame.width
+            if sidebarWidth < 150 {
+                sidebarWidth = 220
+            }
+
+            let newWidth = splitView.bounds.width
+            let editorWidth = newWidth - sidebarWidth - dividerThickness
+
+            sidebarView.frame = NSRect(x: 0, y: 0, width: sidebarWidth, height: splitView.bounds.height)
+            editorView.frame = NSRect(x: sidebarWidth + dividerThickness, y: 0, width: editorWidth, height: splitView.bounds.height)
+        } else if splitView === editorSplitView {
+            // Editor split: comment sidebar keeps its width, editor gets the rest
+            guard splitView.subviews.count >= 1 else {
+                splitView.adjustSubviews()
+                return
+            }
+
+            let editorView = splitView.subviews[0]
+            let dividerThickness = splitView.dividerThickness
+            let newWidth = splitView.bounds.width
+            let height = splitView.bounds.height
+
+            if splitView.subviews.count == 2 {
+                let commentView = splitView.subviews[1]
+                var commentWidth = commentView.frame.width
+                if commentWidth < 200 { commentWidth = 280 }
+
+                let editorWidth = newWidth - commentWidth - dividerThickness
+                editorView.frame = NSRect(x: 0, y: 0, width: editorWidth, height: height)
+                commentView.frame = NSRect(x: editorWidth + dividerThickness, y: 0, width: commentWidth, height: height)
+            } else {
+                editorView.frame = NSRect(x: 0, y: 0, width: newWidth, height: height)
+            }
+        } else {
             splitView.adjustSubviews()
-            return
         }
-
-        let sidebarView = splitView.subviews[0]
-        let editorView = splitView.subviews[1]
-        let dividerThickness = splitView.dividerThickness
-
-        // Keep sidebar at its current width (or default 220 if too small)
-        var sidebarWidth = sidebarView.frame.width
-        if sidebarWidth < 150 {
-            sidebarWidth = 220
-        }
-
-        let newWidth = splitView.bounds.width
-        let editorWidth = newWidth - sidebarWidth - dividerThickness
-
-        sidebarView.frame = NSRect(x: 0, y: 0, width: sidebarWidth, height: splitView.bounds.height)
-        editorView.frame = NSRect(x: sidebarWidth + dividerThickness, y: 0, width: editorWidth, height: splitView.bounds.height)
     }
 }
