@@ -20,9 +20,6 @@ final class MainWindowController: NSWindowController {
     /// Editor view controller.
     private(set) var editorViewController: EditorViewController!
 
-    /// Quick open controller.
-    private var quickOpenController: QuickOpenController?
-
     /// Theme observer.
     private var themeObserver: NSObjectProtocol?
 
@@ -30,7 +27,6 @@ final class MainWindowController: NSWindowController {
         super.init(window: nil)
         setupWindow()
         setupTabManager()
-        setupQuickOpen()
     }
 
     required init?(coder: NSCoder) {
@@ -153,20 +149,6 @@ final class MainWindowController: NSWindowController {
 
         // Create initial empty document so tabs are never empty
         newDocument()
-    }
-
-    private func setupQuickOpen() {
-        quickOpenController = QuickOpenController()
-        quickOpenController?.workspaceManager = workspaceManager
-        quickOpenController?.onFileSelected = { [weak self] url in
-            try? self?.openFile(at: url)
-        }
-    }
-
-    // MARK: - Quick Open
-
-    func showQuickOpen() {
-        quickOpenController?.showWindow(nil)
     }
 
     // MARK: - Document Operations

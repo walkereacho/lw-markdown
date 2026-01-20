@@ -10,7 +10,6 @@ Built on TextKit 2, requiring macOS 13 (Ventura) or later.
 - **Full Markdown Support** - Headings, bold, italic, inline code, code blocks, lists, blockquotes, and more
 - **Syntax Highlighting** - Code blocks with language-aware syntax highlighting via [Highlightr](https://github.com/raspu/Highlightr)
 - **Workspace Support** - Open folders as workspaces with a file tree sidebar
-- **Quick Open** - Fast file navigation with `Cmd+P`
 - **Tabs** - Work with multiple documents simultaneously
 - **File Watching** - Sidebar updates automatically when files change on disk
 - **Native Performance** - Pure AppKit, no Electron, no web views
@@ -60,12 +59,11 @@ swift run MarkdownEditor
 ### Opening Files
 
 - **File > Open** (`Cmd+O`) - Open a single Markdown file
-- **File > Quick Open** (`Cmd+P`) - Fuzzy search files in the current workspace
 - Drag and drop `.md` files onto the window
 
 ### Opening a Workspace
 
-A workspace is a folder containing Markdown files. When opened, the sidebar shows the file tree and enables Quick Open across all files.
+A workspace is a folder containing Markdown files. When opened, the sidebar shows the file tree.
 
 ### Keyboard Shortcuts
 
@@ -73,7 +71,6 @@ A workspace is a folder containing Markdown files. When opened, the sidebar show
 |--------|----------|
 | New Document | `Cmd+N` |
 | Open File | `Cmd+O` |
-| Quick Open | `Cmd+P` |
 | Save | `Cmd+S` |
 | Save As | `Cmd+Shift+S` |
 | Undo | `Cmd+Z` |
@@ -172,8 +169,7 @@ Sources/MarkdownEditor/
 ├── Workspace/              # File tree and workspace management
 │   ├── WorkspaceManager.swift
 │   ├── SidebarController.swift
-│   ├── FileWatcher.swift
-│   └── QuickOpenController.swift
+│   └── FileWatcher.swift
 ├── Protocols/              # Core interfaces
 └── Stubs/                  # Test doubles
 ```

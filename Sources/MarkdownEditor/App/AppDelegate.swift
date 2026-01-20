@@ -87,7 +87,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenuItem.submenu = fileMenu
         fileMenu.addItem(withTitle: "New", action: #selector(newDocument(_:)), keyEquivalent: "n")
         fileMenu.addItem(withTitle: "Open...", action: #selector(openDocument(_:)), keyEquivalent: "o")
-        fileMenu.addItem(withTitle: "Quick Open...", action: #selector(showQuickOpen(_:)), keyEquivalent: "p")
         fileMenu.addItem(NSMenuItem.separator())
         fileMenu.addItem(withTitle: "Save", action: #selector(saveDocument(_:)), keyEquivalent: "s")
         fileMenu.addItem(withTitle: "Save As...", action: #selector(saveDocumentAs(_:)), keyEquivalent: "S")
@@ -124,10 +123,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func saveDocumentAs(_ sender: Any?) {
         mainWindowController?.saveDocumentAs()
-    }
-
-    @objc private func showQuickOpen(_ sender: Any?) {
-        mainWindowController?.showQuickOpen()
     }
 
     @objc func openWorkspaceAction(_ sender: Any?) {

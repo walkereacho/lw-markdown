@@ -54,7 +54,7 @@ Per-Pane TextKit 2 Infrastructure:
 - **Parser/** - `MarkdownParser` (lexical analysis), `BlockContext`/`BlockContextScanner` (stateful block parsing)
 - **Rendering/** - `MarkdownLayoutFragment` (custom drawing), `MarkdownLayoutManagerDelegate` (fragment factory), `SyntaxTheme`
 - **Tabs/** - `TabManager` (document lifecycle), `TabBarView`/`TabView` (UI)
-- **Workspace/** - `WorkspaceManager` (file tree), `FileWatcher` (FSEvents), `QuickOpenController`
+- **Workspace/** - `WorkspaceManager` (file tree), `FileWatcher` (FSEvents), `SidebarController`
 
 ### Protocols
 

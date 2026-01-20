@@ -86,12 +86,6 @@ final class MoodyTheme: DesignSystem {
             sidebarSecondaryText: NSColor(hex: "#6B7280"),
             sidebarIcon: NSColor(hex: "#6B7280"),
 
-            // Quick Open
-            quickOpenBackground: NSColor(hex: "#0D0D0D"),
-            quickOpenInputBackground: NSColor(hex: "#1A1A1A"),
-            quickOpenResultHover: NSColor(hex: "#1F1F1F"),
-            quickOpenResultSelected: NSColor(hex: "#252525"),
-
             // Accents
             accentPrimary: NSColor(hex: "#8B5CF6"),
             accentSecondary: NSColor(hex: "#A78BFA"),
@@ -124,12 +118,6 @@ final class MoodyTheme: DesignSystem {
             sidebarText: NSColor(hex: "#404040"),
             sidebarSecondaryText: NSColor(hex: "#737373"),
             sidebarIcon: NSColor(hex: "#737373"),
-
-            // Quick Open
-            quickOpenBackground: NSColor(hex: "#FAFAFA"),
-            quickOpenInputBackground: NSColor(hex: "#FFFFFF"),
-            quickOpenResultHover: NSColor(hex: "#F5F5F5"),
-            quickOpenResultSelected: NSColor(hex: "#EBEBEB"),
 
             // Accents
             accentPrimary: NSColor(hex: "#7C3AED"),

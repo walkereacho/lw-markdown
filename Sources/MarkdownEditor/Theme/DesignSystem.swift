@@ -131,20 +131,6 @@ struct DesignSystemColors {
     /// Sidebar icon tint
     let sidebarIcon: NSColor
 
-    // MARK: - Quick Open
-
-    /// Quick open panel background
-    let quickOpenBackground: NSColor
-
-    /// Quick open search input background
-    let quickOpenInputBackground: NSColor
-
-    /// Quick open result hover background
-    let quickOpenResultHover: NSColor
-
-    /// Quick open result selected background
-    let quickOpenResultSelected: NSColor
-
     // MARK: - Accents
 
     /// Primary accent color
