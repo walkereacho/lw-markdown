@@ -839,7 +839,7 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     /// Draw inactive ordered list item with formatted number.
     /// Hides the "1." syntax and replaces with a cleanly rendered number.
     /// Handles inline formatting within the list item content.
-    /// NOTE: Position content based on number width + gap to match unordered list spacing.
+    /// NOTE: Position number and content based on actual text measurements to match active mode.
     private func drawInactiveOrderedListItem(text: String, token: MarkdownToken, number: Int, at point: CGPoint, in context: CGContext) {
         let contentStart = token.contentRange.lowerBound
 
@@ -847,6 +847,10 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         let markerStart = token.syntaxRanges.first?.lowerBound ?? 0
         let leadingText = substring(of: text, from: 0, to: markerStart)
         let leadingWidth = measureWidth(leadingText, attributes: theme.bodyAttributes)
+
+        // Measure where content starts (after marker) - matches unordered list approach
+        let prefixText = substring(of: text, from: 0, to: contentStart)
+        let prefixWidth = measureWidth(prefixText, attributes: theme.bodyAttributes)
 
         // Draw the number at marker position (where "1." would be in active mode)
         let numberString = "\(number)."
@@ -863,10 +867,8 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             return t.contentRange.lowerBound >= contentStart
         }
 
-        // Calculate content position: number width + small gap (matches unordered bullet spacing feel)
-        let numberWidth = measureWidth(numberString, attributes: theme.bodyAttributes)
-        let gapAfterNumber: CGFloat = 4.0  // Consistent gap, matches unordered visual spacing
-        let contentPoint = CGPoint(x: point.x + leadingWidth + numberWidth + gapAfterNumber, y: point.y)
+        // Calculate content position to match active mode (same approach as unordered lists)
+        let contentPoint = CGPoint(x: point.x + prefixWidth, y: point.y)
 
         // If no inline tokens, draw plain text
         if inlineTokens.isEmpty {
