@@ -14,12 +14,8 @@ final class ThemeManager {
     /// Shared singleton instance
     static let shared = ThemeManager()
 
-    /// Current design system - change to switch entire aesthetic
-    var currentDesignSystem: DesignSystem = MoodyTheme() {
-        didSet {
-            NotificationCenter.default.post(name: .designSystemDidChange, object: nil)
-        }
-    }
+    /// Current design system
+    let currentDesignSystem: DesignSystem = OceanBlueTheme()
 
     /// Convenience: current colors for the effective appearance
     var colors: DesignSystemColors {
