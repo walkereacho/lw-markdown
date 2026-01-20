@@ -326,10 +326,13 @@ final class MainWindowController: NSWindowController {
             toggleCommentSidebar()
             return
         }
-        let range = pane.textView.selectedRange()
-        let selectedText = (pane.textView.string as NSString).substring(with: range)
+        let nsRange = pane.textView.selectedRange()
+        let text = pane.textView.string
+        let selectedText = (text as NSString).substring(with: nsRange)
+        // Convert NSRange to Range<String.Index> for occurrence tracking
+        let stringRange = Range(nsRange, in: text)
         if !isCommentSidebarVisible { showCommentSidebar() }
-        commentSidebarController?.beginAddingComment(anchorText: selectedText)
+        commentSidebarController?.beginAddingComment(anchorText: selectedText, anchorRange: stringRange)
     }
 
     private func loadCommentsForActiveDocument() {
@@ -351,7 +354,8 @@ final class MainWindowController: NSWindowController {
 
     private func scrollToComment(_ comment: Comment) {
         guard let pane = editorViewController.currentPane,
-              let range = pane.textView.string.range(of: comment.anchorText) else { return }
+              let store = commentSidebarController?.commentStore,
+              let range = store.findAnchorRange(for: comment, in: pane.textView.string) else { return }
         let nsRange = NSRange(range, in: pane.textView.string)
 
         // Set selection to make paragraph active (shows raw markdown)

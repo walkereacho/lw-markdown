@@ -73,17 +73,17 @@ final class CommentSidebarController: NSViewController {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(titleLabel)
 
-        // Count badge
-        let countBadge = NSView()
-        countBadge.translatesAutoresizingMaskIntoConstraints = false
-        countBadge.wantsLayer = true
-        countBadge.identifier = NSUserInterfaceItemIdentifier("countBadge")
-        headerView.addSubview(countBadge)
+        // Beta badge
+        let betaBadge = NSView()
+        betaBadge.translatesAutoresizingMaskIntoConstraints = false
+        betaBadge.wantsLayer = true
+        betaBadge.identifier = NSUserInterfaceItemIdentifier("betaBadge")
+        headerView.addSubview(betaBadge)
 
-        let countLabel = NSTextField(labelWithString: "0")
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
-        countLabel.identifier = NSUserInterfaceItemIdentifier("countLabel")
-        countBadge.addSubview(countLabel)
+        let betaLabel = NSTextField(labelWithString: "BETA")
+        betaLabel.translatesAutoresizingMaskIntoConstraints = false
+        betaLabel.identifier = NSUserInterfaceItemIdentifier("betaLabel")
+        betaBadge.addSubview(betaLabel)
 
         closeButton = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")!, target: self, action: #selector(closeSidebar))
         closeButton.translatesAutoresizingMaskIntoConstraints = false
@@ -105,15 +105,14 @@ final class CommentSidebarController: NSViewController {
             titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
             titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
 
-            countBadge.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 8),
-            countBadge.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            countBadge.heightAnchor.constraint(equalToConstant: 20),
-            countBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
+            betaBadge.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 8),
+            betaBadge.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            betaBadge.heightAnchor.constraint(equalToConstant: 18),
 
-            countLabel.centerXAnchor.constraint(equalTo: countBadge.centerXAnchor),
-            countLabel.centerYAnchor.constraint(equalTo: countBadge.centerYAnchor),
-            countLabel.leadingAnchor.constraint(greaterThanOrEqualTo: countBadge.leadingAnchor, constant: 6),
-            countLabel.trailingAnchor.constraint(lessThanOrEqualTo: countBadge.trailingAnchor, constant: -6),
+            betaLabel.centerXAnchor.constraint(equalTo: betaBadge.centerXAnchor),
+            betaLabel.centerYAnchor.constraint(equalTo: betaBadge.centerYAnchor),
+            betaLabel.leadingAnchor.constraint(equalTo: betaBadge.leadingAnchor, constant: 6),
+            betaLabel.trailingAnchor.constraint(equalTo: betaBadge.trailingAnchor, constant: -6),
 
             closeButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -10),
             closeButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
@@ -223,13 +222,13 @@ final class CommentSidebarController: NSViewController {
         titleLabel.textColor = colors.sidebarText
 
         // Style count badge
-        if let countBadge = headerView.subviews.first(where: { $0.identifier?.rawValue == "countBadge" }) {
-            countBadge.layer?.backgroundColor = colors.accentPrimary.withAlphaComponent(0.15).cgColor
-            countBadge.layer?.cornerRadius = 10
+        if let betaBadge = headerView.subviews.first(where: { $0.identifier?.rawValue == "betaBadge" }) {
+            betaBadge.layer?.backgroundColor = colors.accentPrimary.withAlphaComponent(0.12).cgColor
+            betaBadge.layer?.cornerRadius = 4
 
-            if let countLabel = countBadge.subviews.first(where: { $0.identifier?.rawValue == "countLabel" }) as? NSTextField {
-                countLabel.font = theme.uiFont(size: 11, weight: .semibold)
-                countLabel.textColor = colors.accentPrimary
+            if let betaLabel = betaBadge.subviews.first(where: { $0.identifier?.rawValue == "betaLabel" }) as? NSTextField {
+                betaLabel.font = theme.uiFont(size: 9, weight: .bold)
+                betaLabel.textColor = colors.accentPrimary
             }
         }
 
@@ -255,13 +254,6 @@ final class CommentSidebarController: NSViewController {
         let unresolved = commentStore.unresolvedComments(sortedBy: documentText)
         let resolved = commentStore.resolvedComments()
 
-        // Update count badge
-        if let countBadge = headerView?.subviews.first(where: { $0.identifier?.rawValue == "countBadge" }),
-           let countLabel = countBadge.subviews.first(where: { $0.identifier?.rawValue == "countLabel" }) as? NSTextField {
-            let count = commentStore.comments.count
-            countLabel.stringValue = "\(count)"
-            countBadge.isHidden = count == 0
-        }
 
         for comment in unresolved {
             let card = createCommentCard(for: comment)
