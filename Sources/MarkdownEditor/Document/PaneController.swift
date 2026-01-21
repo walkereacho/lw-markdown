@@ -93,6 +93,10 @@ final class PaneController: NSObject {
 
         // Initialize rendering state after content is loaded
         initializeAfterContentLoad()
+
+        // Clear any cursor restore position set during init
+        // (willProcessEditing fires during setAttributedString and may set this incorrectly)
+        document.cursorRestorePosition = nil
     }
 
     /// Initialize rendering state after content is loaded.

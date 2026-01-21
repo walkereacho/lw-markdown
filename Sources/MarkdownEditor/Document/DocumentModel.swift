@@ -304,14 +304,21 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
             textStorage.removeAttribute(.paragraphStyle, range: attributeRange)
         }
 
+        // Calculate where cursor SHOULD be after edit completes
+        // For insertions: after the inserted text
+        // For deletions (length == 0): at the deletion point
+        let targetCursorPosition = editedRange.location + editedRange.length
+
         if typeChanged {
             // Type changed: apply font to entire paragraph
             textStorage.addAttribute(.font, value: targetFont, range: attributeRange)
-
-            // Remember where cursor SHOULD be after edit completes
-            cursorRestorePosition = editedRange.location + editedRange.length
+            cursorRestorePosition = targetCursorPosition
         } else {
-            // Type unchanged: only apply font to edited range (avoids cursor jump)
+            // Type unchanged: only apply font to edited range
+            // For deletions (length == 0), we still need to set restore position
+            // because other attribute changes may move the cursor
+            cursorRestorePosition = targetCursorPosition
+
             guard editedRange.length > 0, editedRange.location < textStorage.length else { return }
             let safeRange = NSRange(
                 location: editedRange.location,
