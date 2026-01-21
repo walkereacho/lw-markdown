@@ -36,3 +36,9 @@ DerivedData/
 # E2E test screenshots (generated)
 docs/screenshots/test-runs/*.jpg
 docs/screenshots/test-runs/*.png
+
+# Plans (may contain PII/local paths)
+docs/plans/
+
+# Comment sidecar files
+*.comments.json
