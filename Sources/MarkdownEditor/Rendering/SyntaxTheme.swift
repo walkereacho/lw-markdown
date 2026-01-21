@@ -166,7 +166,7 @@ struct SyntaxTheme {
             codeBackgroundColor: NSColor.gray.withAlphaComponent(0.2),
             syntaxCharacterColor: .tertiaryLabelColor,
             blockquoteColor: .secondaryLabelColor,
-            highlightThemeLight: "github",
+            highlightThemeLight: "atom-one-light",
             highlightThemeDark: "atom-one-dark"
         )
     }()

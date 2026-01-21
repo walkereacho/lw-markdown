@@ -66,6 +66,18 @@ final class SyntaxHighlighter {
         highlightr?.availableThemes() ?? []
     }
 
+    /// Returns the base text color from the current theme.
+    /// This is the color used for unhighlighted text in code blocks.
+    var baseTextColor: NSColor {
+        // Highlight a plain character and extract its foreground color
+        if let highlighted = highlightr?.highlight("x", as: "plaintext", fastRender: true),
+           let color = highlighted.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor {
+            return color
+        }
+        // Fallback to standard text color
+        return .textColor
+    }
+
     @objc private func appearanceDidChange() {
         DispatchQueue.main.async { [weak self] in
             self?.updateThemeForAppearance()
@@ -99,8 +111,9 @@ final class SyntaxHighlighter {
         if let lang = normalizedLanguage {
             highlighted = highlightr.highlight(code, as: lang, fastRender: true)
         } else {
-            // No language specified - use auto-detection or plain text
-            highlighted = highlightr.highlight(code, fastRender: true)
+            // No language specified - return nil to use plain monospace fallback
+            // (don't use auto-detection as it produces false positives)
+            return nil
         }
 
         // Cache result

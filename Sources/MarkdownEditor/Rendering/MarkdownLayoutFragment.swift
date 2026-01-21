@@ -1029,6 +1029,11 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
         // Always apply syntax highlighting (or fallback to plain monospace)
         // Code block content should look consistent regardless of cursor position
+        // Ensure SyntaxHighlighter uses the correct theme for current appearance
+        let expectedTheme = theme.highlightTheme
+        if SyntaxHighlighter.shared.currentThemeName != expectedTheme {
+            SyntaxHighlighter.shared.setTheme(expectedTheme)
+        }
         if let highlighted = SyntaxHighlighter.shared.highlight(code: text, language: language) {
             // IMPORTANT: Replace Highlightr's font with our codeFont to match storage metrics
             // This ensures cursor positioning is correct while keeping syntax colors
@@ -1037,7 +1042,12 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             drawAttributedString(mutableHighlighted, at: point, in: context)
         } else {
             // Fallback to plain monospace if highlighting fails or no language specified
-            let attrString = NSAttributedString(string: text, attributes: theme.codeBlockAttributes)
+            // Use the highlighter's base text color for consistency with highlighted blocks
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: theme.codeFont,
+                .foregroundColor: SyntaxHighlighter.shared.baseTextColor
+            ]
+            let attrString = NSAttributedString(string: text, attributes: attrs)
             drawAttributedString(attrString, at: point, in: context)
         }
     }
