@@ -9,14 +9,12 @@ final class MarkdownLayoutFragmentProvider: LayoutFragmentProviding {
     func createLayoutFragment(
         for paragraph: NSTextParagraph,
         range: NSTextRange?,
-        tokens: [MarkdownToken],
-        paragraphIndex: Int
+        tokens: [MarkdownToken]
     ) -> NSTextLayoutFragment {
         return MarkdownLayoutFragment(
             textElement: paragraph,
             range: range,
             tokens: tokens,
-            paragraphIndex: paragraphIndex,
             paneController: paneController,
             theme: theme
         )

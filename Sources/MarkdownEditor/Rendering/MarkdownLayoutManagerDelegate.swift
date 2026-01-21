@@ -46,14 +46,8 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
     ) -> NSTextLayoutFragment {
 
         guard let paragraph = textElement as? NSTextParagraph,
-              let pane = paneController,
-              let document = pane.document else {
+              let pane = paneController else {
             // Fallback to default fragment
-            return NSTextLayoutFragment(textElement: textElement, range: textElement.elementRange)
-        }
-
-        // Get paragraph index
-        guard let paragraphIndex = document.paragraphIndex(for: location) else {
             return NSTextLayoutFragment(textElement: textElement, range: textElement.elementRange)
         }
 
@@ -64,12 +58,11 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
 
         let tokens = tokenProvider.parse(text)
 
-        // Return custom fragment (checks active state and code block info at draw time, not creation time)
+        // Return custom fragment (computes paragraph index at draw time for correct code block status)
         return MarkdownLayoutFragment(
             textElement: paragraph,
             range: paragraph.elementRange,
             tokens: tokens,
-            paragraphIndex: paragraphIndex,
             paneController: pane,
             theme: theme
         )

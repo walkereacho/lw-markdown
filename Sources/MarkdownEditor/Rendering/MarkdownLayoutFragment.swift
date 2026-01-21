@@ -28,24 +28,34 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     /// Parsed Markdown tokens for this paragraph.
     let tokens: [MarkdownToken]
 
-    /// Paragraph index for checking active state at draw time.
-    let paragraphIndex: Int
-
     /// Reference to pane controller for checking active state.
     weak var paneController: PaneController?
 
     /// Theme for visual styling.
     let theme: SyntaxTheme
 
+    /// Compute paragraph index dynamically at draw time.
+    /// This ensures correct index even when paragraphs are inserted/deleted.
+    /// Uses the fragment's text location to query the document's paragraph cache.
+    private var currentParagraphIndex: Int? {
+        guard let location = textElement?.elementRange?.location,
+              let document = paneController?.document else {
+            return nil
+        }
+        return document.paragraphIndex(for: location)
+    }
+
     /// Check if this paragraph is currently active (at draw time, not creation time).
     private var isActiveParagraph: Bool {
-        paneController?.isActiveParagraph(at: paragraphIndex) ?? false
+        guard let index = currentParagraphIndex else { return false }
+        return paneController?.isActiveParagraph(at: index) ?? false
     }
 
     /// Code block information queried at draw time (not creation time).
     /// This allows code block status to update when fences are added/removed.
     private var codeBlockInfo: CodeBlockInfo? {
-        paneController?.codeBlockInfo(at: paragraphIndex)
+        guard let index = currentParagraphIndex else { return nil }
+        return paneController?.codeBlockInfo(at: index)
     }
 
     // MARK: - Initialization
@@ -54,12 +64,10 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         textElement: NSTextElement,
         range: NSTextRange?,
         tokens: [MarkdownToken],
-        paragraphIndex: Int,
         paneController: PaneController?,
         theme: SyntaxTheme
     ) {
         self.tokens = tokens
-        self.paragraphIndex = paragraphIndex
         self.paneController = paneController
         self.theme = theme
         super.init(textElement: textElement, range: range)

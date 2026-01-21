@@ -12,12 +12,11 @@ protocol LayoutFragmentProviding {
     ///   - paragraph: The text paragraph element.
     ///   - range: The text range of the paragraph.
     ///   - tokens: Parsed Markdown tokens for this paragraph.
-    ///   - paragraphIndex: Index of this paragraph for active state lookup.
     /// - Returns: Custom layout fragment for rendering.
+    /// - Note: Paragraph index is computed at draw time to handle paragraph insertion/deletion.
     func createLayoutFragment(
         for paragraph: NSTextParagraph,
         range: NSTextRange?,
-        tokens: [MarkdownToken],
-        paragraphIndex: Int
+        tokens: [MarkdownToken]
     ) -> NSTextLayoutFragment
 }
