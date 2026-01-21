@@ -117,10 +117,16 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
 
         // Return expanded bounds if needed
-        if maxHeight > baseBounds.height || width > baseBounds.width {
+        // For code blocks and horizontal rules, always use calculated width for consistency
+        // (empty lines would otherwise have different width than lines with text)
+        if needsFullWidth || maxHeight > baseBounds.height {
+            // Use consistent origin for code blocks - baseBounds.origin differs between
+            // empty lines (0,0) and text lines (-3,-2), causing inconsistent clipping
+            let originX = needsFullWidth ? 0.0 : baseBounds.origin.x
+            let originY = needsFullWidth ? 0.0 : baseBounds.origin.y
             return CGRect(
-                x: baseBounds.origin.x,
-                y: baseBounds.origin.y,
+                x: originX,
+                y: originY,
                 width: width,
                 height: maxHeight
             )
