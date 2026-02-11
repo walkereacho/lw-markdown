@@ -348,6 +348,76 @@ final class RenderingCorrectnessHarness {
         }
     }
 
+    // MARK: - Layer 3: Fragment Rendering Assertions
+
+    /// Get the layout fragment for a specific paragraph.
+    func fragment(at paragraphIndex: Int) -> NSTextLayoutFragment? {
+        guard let range = documentModel.paragraphRange(at: paragraphIndex) else { return nil }
+        var result: NSTextLayoutFragment?
+        paneController.layoutManager.enumerateTextLayoutFragments(
+            from: range.location,
+            options: [.ensuresLayout]
+        ) { fragment in
+            result = fragment
+            return false  // Stop after first
+        }
+        return result
+    }
+
+    /// Assert the fragment at a paragraph index is a MarkdownLayoutFragment with expected tokens.
+    func assertFragmentTokensMatchParse(
+        paragraph index: Int,
+        context: String = "",
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        guard let text = paragraphText(at: index) else { return }
+        if text.isEmpty { return }
+
+        let prefix = "Paragraph \(index)\(context.isEmpty ? "" : " (\(context))")"
+
+        guard let frag = fragment(at: index) else {
+            XCTFail("\(prefix): no layout fragment found", file: file, line: line)
+            return
+        }
+
+        guard let mdFragment = frag as? MarkdownLayoutFragment else {
+            // Non-markdown fragment is acceptable for empty lines
+            return
+        }
+
+        // Re-parse and compare
+        let expectedTokens = parser.parse(text)
+
+        XCTAssertEqual(mdFragment.tokens.count, expectedTokens.count,
+            "\(prefix): token count mismatch — fragment has \(mdFragment.tokens.count), fresh parse has \(expectedTokens.count)",
+            file: file, line: line)
+
+        for (i, (actual, expected)) in zip(mdFragment.tokens, expectedTokens).enumerated() {
+            XCTAssertEqual(actual.element, expected.element,
+                "\(prefix): token[\(i)] element mismatch — fragment has \(actual.element), expected \(expected.element)",
+                file: file, line: line)
+            XCTAssertEqual(actual.contentRange, expected.contentRange,
+                "\(prefix): token[\(i)] contentRange mismatch — fragment has \(actual.contentRange), expected \(expected.contentRange)",
+                file: file, line: line)
+        }
+    }
+
+    /// Assert a paragraph's active/inactive state.
+    func assertFragmentIsActive(
+        paragraph index: Int,
+        _ expectedActive: Bool,
+        context: String = "",
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        let prefix = "Paragraph \(index)\(context.isEmpty ? "" : " (\(context))")"
+        let actual = paneController.isActiveParagraph(at: index)
+        XCTAssertEqual(actual, expectedActive,
+            "\(prefix): expected active=\(expectedActive), got \(actual)",
+            file: file, line: line)
+    }
+
     // MARK: - Private Helpers
 
     /// Convert paragraph index + char offset to absolute storage offset.

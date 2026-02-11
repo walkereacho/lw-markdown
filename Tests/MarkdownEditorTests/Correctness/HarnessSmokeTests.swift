@@ -104,4 +104,27 @@ final class HarnessSmokeTests: XCTestCase {
 
         harness.assertInlineFontsConsistent(paragraph: 0)
     }
+
+    // MARK: - Layer 3: Fragment Rendering
+
+    func testFragmentTokensMatchParse() {
+        let harness = RenderingCorrectnessHarness()
+        harness.setText("# Heading\n**bold text**\nPlain\n")
+        harness.forceLayout()
+
+        harness.assertFragmentTokensMatchParse(paragraph: 0)
+        harness.assertFragmentTokensMatchParse(paragraph: 1)
+        harness.assertFragmentTokensMatchParse(paragraph: 2)
+    }
+
+    func testActiveParagraphState() {
+        let harness = RenderingCorrectnessHarness()
+        harness.setText("Line A\nLine B\nLine C\n")
+        harness.forceLayout()
+
+        // Default: paragraph 0 is active (cursor starts at beginning)
+        harness.assertFragmentIsActive(paragraph: 0, true)
+        harness.assertFragmentIsActive(paragraph: 1, false)
+        harness.assertFragmentIsActive(paragraph: 2, false)
+    }
 }
