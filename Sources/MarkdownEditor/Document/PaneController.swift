@@ -151,28 +151,78 @@ final class PaneController: NSObject {
         let oldBlockContext = layoutDelegate.blockContext
 
         // Get the edited paragraph index from cursor position
-        guard let location = cursorTextLocation,
-              let editedIndex = document?.paragraphIndex(for: location) else {
+        if let location = cursorTextLocation,
+           let editedIndex = document?.paragraphIndex(for: location) {
+            // Incremental update from edit location
+            layoutDelegate.updateBlockContextIncremental(afterEditAt: editedIndex, paragraphs: paragraphs)
+        } else {
             // Fallback to full scan if we can't determine edit location
             layoutDelegate.updateBlockContext(paragraphs: paragraphs)
-            return
         }
-
-        // Update block context
-        layoutDelegate.updateBlockContextIncremental(afterEditAt: editedIndex, paragraphs: paragraphs)
 
         // Find paragraphs whose code-block status changed
         let newBlockContext = layoutDelegate.blockContext
-        var affectedParagraphs = newBlockContext.paragraphsWithChangedCodeBlockStatus(
+        let affectedParagraphs = newBlockContext.paragraphsWithChangedCodeBlockStatus(
             comparedTo: oldBlockContext,
             paragraphCount: paragraphs.count
         )
 
-        // Exclude the edited paragraph (TextKit 2 already handles it)
-        affectedParagraphs.remove(editedIndex)
+        // Apply correct fonts to affected paragraphs and invalidate for fragment recreation.
+        // willProcessEditing only handles .editedCharacters, so font cascading must be done
+        // directly here when code-block boundaries change.
+        if !affectedParagraphs.isEmpty {
+            applyFontsToParagraphs(affectedParagraphs, paragraphs: paragraphs)
+            invalidateParagraphsDisplay(affectedParagraphs)
+        }
+    }
 
-        // Invalidate affected paragraphs to force fragment recreation
-        invalidateParagraphsDisplay(affectedParagraphs)
+    /// Apply correct fonts to specific paragraphs based on current block context.
+    /// Called when code-block boundaries change and affected paragraphs need font updates.
+    private func applyFontsToParagraphs(_ indices: Set<Int>, paragraphs: [String]) {
+        guard let textStorage = textView.textStorage else { return }
+        let theme = SyntaxTheme.default
+        let blockContext = layoutDelegate.blockContext
+
+        textStorage.beginEditing()
+        var offset = 0
+        for (index, para) in paragraphs.enumerated() {
+            let range = NSRange(location: offset, length: para.count)
+            offset += para.count + 1
+
+            guard indices.contains(index),
+                  range.location + range.length <= textStorage.length,
+                  range.length > 0 else { continue }
+
+            let isCodeBlockContent = blockContext.isInsideFencedCodeBlock(paragraphIndex: index).0
+            let isOpeningFence = blockContext.isOpeningFence(paragraphIndex: index).0
+            let isClosingFence = blockContext.isClosingFence(paragraphIndex: index)
+
+            if isCodeBlockContent || isOpeningFence || isClosingFence {
+                textStorage.addAttribute(.font, value: theme.codeFont, range: range)
+            } else {
+                // Reverted to non-code: apply correct font based on paragraph type
+                let tokens = layoutDelegate.tokenProvider.parse(para)
+                var applied = false
+                for token in tokens {
+                    switch token.element {
+                    case .heading(let level):
+                        let font = theme.headingFonts[level] ?? theme.bodyFont
+                        textStorage.addAttribute(.font, value: font, range: range)
+                        applied = true
+                    case .blockquote:
+                        textStorage.addAttribute(.font, value: theme.italicFont, range: range)
+                        applied = true
+                    default:
+                        break
+                    }
+                    if applied { break }
+                }
+                if !applied {
+                    textStorage.addAttribute(.font, value: theme.bodyFont, range: range)
+                }
+            }
+        }
+        textStorage.endEditing()
     }
 
     /// Update block context by scanning all paragraphs. O(N) - for initialization only.
