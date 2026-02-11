@@ -44,4 +44,33 @@ final class HarnessSmokeTests: XCTestCase {
         XCTAssertTrue(harness.textStorage.string.contains("# Heading 1"))
         XCTAssertGreaterThan(harness.paragraphCount, 0)
     }
+
+    // MARK: - Layer 1: BlockContext Assertions
+
+    func testBlockContextAssertionsWithCodeBlocks() {
+        let harness = RenderingCorrectnessHarness()
+        harness.setText("# Title\n```swift\nlet x = 1\n```\nBody\n")
+        harness.forceLayout()
+
+        // paragraph 0: "# Title" — normal
+        harness.assertBlockContext(paragraph: 0, isCodeBlock: false)
+        // paragraph 1: "```swift" — opening fence
+        harness.assertBlockContext(paragraph: 1, isCodeBlock: false, isFence: true)
+        // paragraph 2: "let x = 1" — code block content
+        harness.assertBlockContext(paragraph: 2, isCodeBlock: true)
+        // paragraph 3: "```" — closing fence
+        harness.assertBlockContext(paragraph: 3, isCodeBlock: false, isFence: true)
+        // paragraph 4: "Body" — normal
+        harness.assertBlockContext(paragraph: 4, isCodeBlock: false)
+    }
+
+    func testBlockContextConsistency() {
+        let harness = RenderingCorrectnessHarness()
+        harness.setText("```\ncode\n```\ntext\n")
+        harness.forceLayout()
+
+        for i in 0..<harness.paragraphCount {
+            harness.assertBlockContextConsistent(paragraph: i)
+        }
+    }
 }

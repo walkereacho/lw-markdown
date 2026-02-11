@@ -144,6 +144,88 @@ final class RenderingCorrectnessHarness {
         return NSRange(location: offset, length: paragraphs[index].count)
     }
 
+    // MARK: - Layer 1: DocumentModel Assertions
+
+    /// Assert paragraph count matches expected value.
+    func assertParagraphCount(
+        _ expected: Int,
+        context: String = "",
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        let actual = paragraphCount
+        XCTAssertEqual(actual, expected,
+            "Paragraph count mismatch\(context.isEmpty ? "" : " (\(context))"): expected \(expected), got \(actual)",
+            file: file, line: line)
+    }
+
+    /// Assert a specific paragraph's code block status.
+    func assertBlockContext(
+        paragraph index: Int,
+        isCodeBlock: Bool,
+        isFence: Bool = false,
+        context: String = "",
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        let blockContext = paneController.layoutDelegate.blockContext
+        let (isInside, _) = blockContext.isInsideFencedCodeBlock(paragraphIndex: index)
+        let isOpenFence = blockContext.isOpeningFence(paragraphIndex: index).0
+        let isCloseFence = blockContext.isClosingFence(paragraphIndex: index)
+        let actualIsCodeBlock = isInside
+        let actualIsFence = isOpenFence || isCloseFence
+
+        let prefix = "Paragraph \(index)\(context.isEmpty ? "" : " (\(context))")"
+
+        if isCodeBlock {
+            XCTAssertTrue(actualIsCodeBlock,
+                "\(prefix): expected code block content, but was not",
+                file: file, line: line)
+        } else if isFence {
+            XCTAssertTrue(actualIsFence,
+                "\(prefix): expected fence line, but was not",
+                file: file, line: line)
+        } else {
+            XCTAssertFalse(actualIsCodeBlock || actualIsFence,
+                "\(prefix): expected normal text, but was code block (inside=\(actualIsCodeBlock), fence=\(actualIsFence))",
+                file: file, line: line)
+        }
+    }
+
+    /// Re-derive block context from raw text and compare against stored context.
+    /// Catches stale BlockContext after edits.
+    func assertBlockContextConsistent(
+        paragraph index: Int,
+        context: String = "",
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        let text = textStorage.string
+        let paragraphs = text.components(separatedBy: "\n")
+        let freshContext = BlockContextScanner().scan(paragraphs: paragraphs)
+        let storedContext = paneController.layoutDelegate.blockContext
+
+        let prefix = "Paragraph \(index)\(context.isEmpty ? "" : " (\(context))")"
+
+        let (freshInside, _) = freshContext.isInsideFencedCodeBlock(paragraphIndex: index)
+        let (storedInside, _) = storedContext.isInsideFencedCodeBlock(paragraphIndex: index)
+        XCTAssertEqual(freshInside, storedInside,
+            "\(prefix): BlockContext stale — fresh scan says isInside=\(freshInside), stored says \(storedInside)",
+            file: file, line: line)
+
+        let freshIsOpenFence = freshContext.isOpeningFence(paragraphIndex: index).0
+        let storedIsOpenFence = storedContext.isOpeningFence(paragraphIndex: index).0
+        XCTAssertEqual(freshIsOpenFence, storedIsOpenFence,
+            "\(prefix): BlockContext stale — fresh scan says isOpeningFence=\(freshIsOpenFence), stored says \(storedIsOpenFence)",
+            file: file, line: line)
+
+        let freshIsCloseFence = freshContext.isClosingFence(paragraphIndex: index)
+        let storedIsCloseFence = storedContext.isClosingFence(paragraphIndex: index)
+        XCTAssertEqual(freshIsCloseFence, storedIsCloseFence,
+            "\(prefix): BlockContext stale — fresh scan says isClosingFence=\(freshIsCloseFence), stored says \(storedIsCloseFence)",
+            file: file, line: line)
+    }
+
     // MARK: - Private Helpers
 
     /// Convert paragraph index + char offset to absolute storage offset.
