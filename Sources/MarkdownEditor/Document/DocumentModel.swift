@@ -1,4 +1,5 @@
 import AppKit
+import os.signpost
 
 /// Errors that can occur during document operations.
 enum DocumentError: LocalizedError {
@@ -215,6 +216,14 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         // Only process if characters changed (not just attributes)
         guard editedMask.contains(.editedCharacters) else { return }
 
+        let spid = OSSignpostID(log: Signposts.editing)
+        os_signpost(.begin, log: Signposts.editing, name: Signposts.willProcessEditing, signpostID: spid)
+        let wpeStart = CACurrentMediaTime()
+        defer {
+            PerfTimer.shared.record("willProcessEditing", ms: (CACurrentMediaTime() - wpeStart) * 1000)
+            os_signpost(.end, log: Signposts.editing, name: Signposts.willProcessEditing, signpostID: spid)
+        }
+
         let text = textStorage.string
         guard !text.isEmpty else { return }
 
@@ -334,6 +343,7 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
             cursorRestorePosition = editedRange.location + editedRange.length
             theme.applyInlineFormattingFonts(to: textStorage, tokens: tokens, paragraphOffset: paragraphRange.location)
         }
+
     }
 
     /// Total indent for list items - must match MarkdownLayoutFragment.listIndent

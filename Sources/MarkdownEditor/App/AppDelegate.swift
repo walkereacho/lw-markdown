@@ -16,6 +16,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Bring app to front
         NSApp.activate(ignoringOtherApps: true)
+
+        // Run scroll perf test if requested (after a delay to let document fully load)
+        if CommandLine.arguments.contains("--perf-scroll-test") {
+            runScrollPerfTest()
+        }
     }
 
     // MARK: - CLI Test Arguments
@@ -53,6 +58,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            lineIndex + 1 < args.count,
            let line = Int(args[lineIndex + 1]) {
             mainWindowController?.setCursorLine(line)
+        }
+    }
+
+    // MARK: - Scroll Performance Test
+
+    /// Automated scroll-to-bottom profiling.
+    /// Waits for document load, resets PerfTimer, scrolls in page-sized steps, then dumps results.
+    private func runScrollPerfTest() {
+        // Scale wait time with document size — large docs take longer to load
+        let docLength = mainWindowController?.tabManager.activeDocument?.fullString().count ?? 0
+        let loadDelay = max(2.0, Double(docLength) / 10_000)  // ~1s per 10K chars, minimum 2s
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + loadDelay) { [weak self] in
+            guard let self,
+                  let pane = self.mainWindowController?.editorViewController.currentPane else {
+                fputs("[PERF] scroll test: no pane available\n", stderr)
+                return
+            }
+
+            let textView = pane.textView
+            guard let scrollView = textView.enclosingScrollView else {
+                fputs("[PERF] scroll test: no scroll view\n", stderr)
+                return
+            }
+
+            // Reset timer to isolate scroll metrics
+            PerfTimer.shared.reset()
+
+            let clipView = scrollView.contentView
+            let contentHeight = textView.frame.height
+            let visibleHeight = clipView.bounds.height
+            let pageStep = visibleHeight * 0.9  // 90% of visible area per step
+
+            // Calculate how many steps to scroll to bottom
+            let maxY = max(0, contentHeight - visibleHeight)
+            let steps = Int(ceil(maxY / pageStep))
+
+            fputs("[PERF] scroll test: \(steps) page-down steps, contentHeight=\(Int(contentHeight)), visibleHeight=\(Int(visibleHeight))\n", stderr)
+
+            // Schedule page-down scrolls with small delays to simulate real scrolling
+            for i in 0...steps {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.05) {
+                    let targetY = min(Double(i) * pageStep, maxY)
+                    let newOrigin = NSPoint(x: 0, y: targetY)
+                    clipView.scroll(to: newOrigin)
+                    scrollView.reflectScrolledClipView(clipView)
+                }
+            }
+
+            // After scrolling completes, dump results and exit
+            let finishDelay = Double(steps + 1) * 0.05 + 0.5
+            DispatchQueue.main.asyncAfter(deadline: .now() + finishDelay) { [weak self] in
+                let filePath = self?.mainWindowController?.tabManager.activeDocument?.filePath?.lastPathComponent ?? "unknown"
+                PerfTimer.shared.printSummary(label: "scroll-\(filePath)")
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NSApp.terminate(nil)
+                }
+            }
         }
     }
 

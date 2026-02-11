@@ -47,18 +47,6 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         return document.paragraphIndex(for: location)
     }
 
-    /// Check if this paragraph is currently active (at draw time, not creation time).
-    private var isActiveParagraph: Bool {
-        guard let index = currentParagraphIndex else { return false }
-        return paneController?.isActiveParagraph(at: index) ?? false
-    }
-
-    /// Code block information queried at draw time (not creation time).
-    /// This allows code block status to update when fences are added/removed.
-    private var codeBlockInfo: CodeBlockInfo? {
-        guard let index = currentParagraphIndex else { return nil }
-        return paneController?.codeBlockInfo(at: index)
-    }
 
     // MARK: - Initialization
 
@@ -83,10 +71,6 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
     /// Override to provide bounds that accommodate larger fonts (headings), full-width horizontal rules, and code block backgrounds.
     override var renderingSurfaceBounds: CGRect {
-        let spid = OSSignpostID(log: Signposts.rendering)
-        os_signpost(.begin, log: Signposts.rendering, name: Signposts.renderingSurfaceBounds, signpostID: spid)
-        defer { os_signpost(.end, log: Signposts.rendering, name: Signposts.renderingSurfaceBounds, signpostID: spid) }
-
         let baseBounds = super.renderingSurfaceBounds
 
         // Find the maximum line height needed based on tokens
@@ -107,7 +91,7 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
 
         // Code blocks need full width for background
-        if codeBlockInfo != nil {
+        if let idx = currentParagraphIndex, paneController?.codeBlockInfo(at: idx) != nil {
             needsFullWidth = true
         }
 
@@ -147,9 +131,11 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         let drawStart = CACurrentMediaTime()
         defer { PerfTimer.shared.record("draw", ms: (CACurrentMediaTime() - drawStart) * 1000) }
 
+        // Cache paragraph index once — used for active state and code block info
+        let paraIndex = currentParagraphIndex
+        let active = paraIndex.map { paneController?.isActiveParagraph(at: $0) ?? false } ?? false
+
         let drawSpid = OSSignpostID(log: Signposts.rendering)
-        let paraIndex = currentParagraphIndex ?? -1
-        let active = isActiveParagraph
 
         guard let paragraph = textElement as? NSTextParagraph else {
             super.draw(at: point, in: context)
@@ -159,39 +145,31 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         let text = paragraph.attributedString.string
 
         // Check if this is part of a fenced code block
-        if let codeInfo = codeBlockInfo {
+        let codeInfo = paraIndex.flatMap { paneController?.codeBlockInfo(at: $0) }
+        if let codeInfo = codeInfo {
             switch codeInfo {
             case .openingFence(let language):
-                os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "fence-open para=%d active=%d", paraIndex, active ? 1 : 0)
-                let subSpid = OSSignpostID(log: Signposts.rendering)
-                os_signpost(.begin, log: Signposts.rendering, name: Signposts.drawFenceLine, signpostID: subSpid)
+                os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "fence-open para=%d active=%d", paraIndex ?? -1, active ? 1 : 0)
+                defer { os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid) }
                 if active {
                     drawActiveFenceLine(text: text, language: language, isOpening: true, at: point, in: context)
                 } else {
                     drawInactiveFenceLine(text: text, language: language, isOpening: true, at: point, in: context)
                 }
-                os_signpost(.end, log: Signposts.rendering, name: Signposts.drawFenceLine, signpostID: subSpid)
-                os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid)
                 return
             case .closingFence:
-                os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "fence-close para=%d active=%d", paraIndex, active ? 1 : 0)
-                let subSpid = OSSignpostID(log: Signposts.rendering)
-                os_signpost(.begin, log: Signposts.rendering, name: Signposts.drawFenceLine, signpostID: subSpid)
+                os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "fence-close para=%d active=%d", paraIndex ?? -1, active ? 1 : 0)
+                defer { os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid) }
                 if active {
                     drawActiveFenceLine(text: text, language: nil, isOpening: false, at: point, in: context)
                 } else {
                     drawInactiveFenceLine(text: text, language: nil, isOpening: false, at: point, in: context)
                 }
-                os_signpost(.end, log: Signposts.rendering, name: Signposts.drawFenceLine, signpostID: subSpid)
-                os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid)
                 return
             case .content(let language):
-                os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "code-content para=%d lang=%{public}s", paraIndex, language ?? "none")
-                let subSpid = OSSignpostID(log: Signposts.rendering)
-                os_signpost(.begin, log: Signposts.rendering, name: Signposts.drawCodeBlockContent, signpostID: subSpid)
+                os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "code-content para=%d lang=%{public}s", paraIndex ?? -1, language ?? "none")
+                defer { os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid) }
                 drawCodeBlockContent(text: text, language: language, at: point, in: context)
-                os_signpost(.end, log: Signposts.rendering, name: Signposts.drawCodeBlockContent, signpostID: subSpid)
-                os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid)
                 return
             }
         }
@@ -203,16 +181,13 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
 
         if let token = hrToken {
-            os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "hr para=%d active=%d", paraIndex, active ? 1 : 0)
-            let subSpid = OSSignpostID(log: Signposts.rendering)
-            os_signpost(.begin, log: Signposts.rendering, name: Signposts.drawHorizontalRule, signpostID: subSpid)
+            os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "hr para=%d active=%d", paraIndex ?? -1, active ? 1 : 0)
+            defer { os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid) }
             if active {
                 drawActiveHorizontalRule(text: text, token: token, at: point, in: context)
             } else {
                 drawInactiveHorizontalRule(at: point, in: context)
             }
-            os_signpost(.end, log: Signposts.rendering, name: Signposts.drawHorizontalRule, signpostID: subSpid)
-            os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid)
             return
         }
 
@@ -223,16 +198,13 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
 
         if let token = headingToken, case .heading(let level) = token.element {
-            os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "heading h%d para=%d active=%d", level, paraIndex, active ? 1 : 0)
-            let subSpid = OSSignpostID(log: Signposts.rendering)
-            os_signpost(.begin, log: Signposts.rendering, name: Signposts.drawHeading, signpostID: subSpid)
+            os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "heading h%d para=%d active=%d", level, paraIndex ?? -1, active ? 1 : 0)
+            defer { os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid) }
             if active {
                 drawActiveHeading(text: text, level: level, token: token, at: point, in: context)
             } else {
                 drawInactiveHeading(text: text, level: level, token: token, at: point, in: context)
             }
-            os_signpost(.end, log: Signposts.rendering, name: Signposts.drawHeading, signpostID: subSpid)
-            os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid)
             return
         }
 
@@ -243,16 +215,13 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
 
         if let token = blockquoteToken {
-            os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "blockquote para=%d active=%d", paraIndex, active ? 1 : 0)
-            let subSpid = OSSignpostID(log: Signposts.rendering)
-            os_signpost(.begin, log: Signposts.rendering, name: Signposts.drawBlockquote, signpostID: subSpid)
+            os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "blockquote para=%d active=%d", paraIndex ?? -1, active ? 1 : 0)
+            defer { os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid) }
             if active {
                 drawActiveBlockquote(text: text, token: token, at: point, in: context)
             } else {
                 drawInactiveBlockquote(text: text, token: token, at: point, in: context)
             }
-            os_signpost(.end, log: Signposts.rendering, name: Signposts.drawBlockquote, signpostID: subSpid)
-            os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid)
             return
         }
 
@@ -263,16 +232,13 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
 
         if let token = unorderedListToken {
-            os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "ul para=%d active=%d", paraIndex, active ? 1 : 0)
-            let subSpid = OSSignpostID(log: Signposts.rendering)
-            os_signpost(.begin, log: Signposts.rendering, name: Signposts.drawUnorderedList, signpostID: subSpid)
+            os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "ul para=%d active=%d", paraIndex ?? -1, active ? 1 : 0)
+            defer { os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid) }
             if active {
                 drawActiveUnorderedListItem(text: text, token: token, at: point, in: context)
             } else {
                 drawInactiveUnorderedListItem(text: text, token: token, at: point, in: context)
             }
-            os_signpost(.end, log: Signposts.rendering, name: Signposts.drawUnorderedList, signpostID: subSpid)
-            os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid)
             return
         }
 
@@ -283,31 +249,24 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         }
 
         if let token = orderedListToken, case .orderedListItem(let number) = token.element {
-            os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "ol para=%d active=%d", paraIndex, active ? 1 : 0)
-            let subSpid = OSSignpostID(log: Signposts.rendering)
-            os_signpost(.begin, log: Signposts.rendering, name: Signposts.drawOrderedList, signpostID: subSpid)
+            os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "ol para=%d active=%d", paraIndex ?? -1, active ? 1 : 0)
+            defer { os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid) }
             if active {
                 drawActiveOrderedListItem(text: text, token: token, number: number, at: point, in: context)
             } else {
                 drawInactiveOrderedListItem(text: text, token: token, number: number, at: point, in: context)
             }
-            os_signpost(.end, log: Signposts.rendering, name: Signposts.drawOrderedList, signpostID: subSpid)
-            os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid)
             return
         }
 
         // Non-heading/non-blockquote/non-list: draw with wrapping support
-        // Use TextKit 2's line fragments for line breaks, but apply our custom formatting
-        os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "text para=%d active=%d", paraIndex, active ? 1 : 0)
-        let subSpid = OSSignpostID(log: Signposts.rendering)
-        os_signpost(.begin, log: Signposts.rendering, name: Signposts.drawWrappedText, signpostID: subSpid)
+        os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "text para=%d active=%d", paraIndex ?? -1, active ? 1 : 0)
+        defer { os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid) }
         if active {
             drawRawMarkdownWrapped(text: text, at: point, in: context)
         } else {
             drawFormattedMarkdownWrapped(text: text, at: point, in: context)
         }
-        os_signpost(.end, log: Signposts.rendering, name: Signposts.drawWrappedText, signpostID: subSpid)
-        os_signpost(.end, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid)
     }
 
     // MARK: - Wrapped Text Drawing

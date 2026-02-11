@@ -1,4 +1,5 @@
 import AppKit
+import os.signpost
 
 /// Delegate that provides custom layout fragments for Markdown rendering.
 ///
@@ -45,6 +46,10 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
         in textElement: NSTextElement
     ) -> NSTextLayoutFragment {
 
+        let spid = OSSignpostID(log: Signposts.layout)
+        os_signpost(.begin, log: Signposts.layout, name: Signposts.fragmentCreation, signpostID: spid)
+        defer { os_signpost(.end, log: Signposts.layout, name: Signposts.fragmentCreation, signpostID: spid) }
+
         guard let paragraph = textElement as? NSTextParagraph,
               let pane = paneController else {
             // Fallback to default fragment
@@ -56,7 +61,9 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
         let rawText = paragraph.attributedString.string
         let text = rawText.trimmingCharacters(in: .newlines)
 
-        let tokens = tokenProvider.parse(text)
+        let tokens = PerfTimer.shared.measure("parse") {
+            tokenProvider.parse(text)
+        }
 
         // Return custom fragment (computes paragraph index at draw time for correct code block status)
         return MarkdownLayoutFragment(
