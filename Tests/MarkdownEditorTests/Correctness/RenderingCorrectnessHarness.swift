@@ -418,6 +418,29 @@ final class RenderingCorrectnessHarness {
             file: file, line: line)
     }
 
+    // MARK: - Bulk Assertions
+
+    /// Assert all three layers are consistent for every paragraph in the document.
+    /// This is the primary regression safety net.
+    func assertAllParagraphsConsistent(
+        context: String = "",
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        let count = paragraphCount
+        for i in 0..<count {
+            // Layer 1: BlockContext is consistent with raw text
+            assertBlockContextConsistent(paragraph: i, context: context, file: file, line: line)
+
+            // Layer 2: Storage fonts match derived expectations
+            assertStorageFontConsistent(paragraph: i, context: context, file: file, line: line)
+            assertInlineFontsConsistent(paragraph: i, context: context, file: file, line: line)
+
+            // Layer 3: Fragment tokens match fresh parse
+            assertFragmentTokensMatchParse(paragraph: i, context: context, file: file, line: line)
+        }
+    }
+
     // MARK: - Private Helpers
 
     /// Convert paragraph index + char offset to absolute storage offset.
