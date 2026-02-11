@@ -52,6 +52,11 @@ final class PaneController: NSObject {
     /// Guard to prevent block context updates during display-only invalidations.
     private var isInvalidatingDisplay = false
 
+    /// Guard to suppress textDidChange/textViewDidChangeSelection during init.
+    /// `initializeAfterContentLoad()` handles the full init sequence; delegate callbacks
+    /// firing before it runs are redundant and cause O(N) font passes to multiply.
+    private var isInitializing = true
+
     // MARK: - Initialization
 
     init(document: DocumentModel, frame: NSRect) {
@@ -107,6 +112,7 @@ final class PaneController: NSObject {
         let spid = OSSignpostID(log: Signposts.layout)
         os_signpost(.begin, log: Signposts.layout, name: Signposts.initAfterContentLoad, signpostID: spid)
         defer { os_signpost(.end, log: Signposts.layout, name: Signposts.initAfterContentLoad, signpostID: spid) }
+        defer { isInitializing = false }
 
         // Update block context FIRST so we know which paragraphs are code blocks
         PerfTimer.shared.measure("init.blockContext") {
@@ -454,10 +460,13 @@ final class PaneController: NSObject {
 extension PaneController: NSTextViewDelegate {
 
     func textViewDidChangeSelection(_ notification: Notification) {
+        guard !isInitializing else { return }
         handleSelectionChange()
     }
 
     func textDidChange(_ notification: Notification) {
+        // Skip during init — initializeAfterContentLoad handles the full sequence
+        guard !isInitializing else { return }
         // Skip if this is just a display invalidation, not an actual text change
         guard !isInvalidatingDisplay else { return }
 
