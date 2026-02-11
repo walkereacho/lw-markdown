@@ -42,3 +42,6 @@ docs/plans/
 
 # Comment sidecar files
 *.comments.json
+
+# Instruments traces
+*.trace/
