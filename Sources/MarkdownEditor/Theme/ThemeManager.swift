@@ -19,7 +19,7 @@ final class ThemeManager {
 
     /// Convenience: current colors for the effective appearance
     var colors: DesignSystemColors {
-        let appearance = NSApp.effectiveAppearance
+        let appearance = NSApp?.effectiveAppearance ?? NSAppearance(named: .aqua)!
         return currentDesignSystem.colors(for: appearance)
     }
 
@@ -50,7 +50,8 @@ final class ThemeManager {
     // MARK: - Appearance Observation
 
     private func observeAppearanceChanges() {
-        appearanceObserver = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
+        guard let app = NSApp else { return }
+        appearanceObserver = app.observe(\.effectiveAppearance, options: [.new]) { _, _ in
             // Re-post notification when system appearance changes
             NotificationCenter.default.post(name: .designSystemDidChange, object: nil)
         }
