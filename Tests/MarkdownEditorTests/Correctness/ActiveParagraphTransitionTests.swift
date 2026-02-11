@@ -88,6 +88,7 @@ final class ActiveParagraphTransitionTests: XCTestCase {
         harness.forceLayout()
 
         let count = harness.paragraphCount
+        var previousParagraph: Int? = nil
         for i in 0..<count {
             guard let text = harness.paragraphText(at: i), !text.isEmpty else { continue }
 
@@ -95,8 +96,13 @@ final class ActiveParagraphTransitionTests: XCTestCase {
             harness.forceLayout()
             harness.assertFragmentIsActive(paragraph: i, true,
                 context: "walk step \(i)")
+            if let prev = previousParagraph {
+                harness.assertFragmentIsActive(paragraph: prev, false,
+                    context: "previous paragraph \(prev) should be inactive at walk step \(i)")
+            }
             harness.assertAllParagraphsConsistent(
                 context: "cursor at paragraph \(i)")
+            previousParagraph = i
         }
     }
 
@@ -106,6 +112,7 @@ final class ActiveParagraphTransitionTests: XCTestCase {
         harness.forceLayout()
 
         let count = harness.paragraphCount
+        var previousParagraph: Int? = nil
         for i in 0..<count {
             guard let text = harness.paragraphText(at: i), !text.isEmpty else { continue }
 
@@ -113,8 +120,13 @@ final class ActiveParagraphTransitionTests: XCTestCase {
             harness.forceLayout()
             harness.assertFragmentIsActive(paragraph: i, true,
                 context: "code-blocks walk step \(i)")
+            if let prev = previousParagraph {
+                harness.assertFragmentIsActive(paragraph: prev, false,
+                    context: "previous paragraph \(prev) should be inactive at code-blocks walk step \(i)")
+            }
             harness.assertAllParagraphsConsistent(
                 context: "code-blocks cursor at paragraph \(i)")
+            previousParagraph = i
         }
     }
 
@@ -125,7 +137,10 @@ final class ActiveParagraphTransitionTests: XCTestCase {
         harness.setText("# H1\n## H2\n**bold**\n`code`\n- list\n")
         harness.forceLayout()
 
-        // Move cursor rapidly through all paragraphs
+        // Move cursor rapidly through all paragraphs without forcing layout
+        // between moves. This deliberately skips intermediate layout invalidation
+        // to verify that the final state is consistent after rapid movement —
+        // intermediate fragment states are not checked.
         for i in 0..<harness.paragraphCount {
             harness.moveCursor(toParagraph: i, offset: 0)
         }

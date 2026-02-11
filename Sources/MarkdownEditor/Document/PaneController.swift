@@ -176,54 +176,6 @@ final class PaneController: NSObject {
         }
     }
 
-    /// Apply correct fonts to specific paragraphs based on current block context.
-    /// Called when code-block boundaries change and affected paragraphs need font updates.
-    private func applyFontsToParagraphs(_ indices: Set<Int>, paragraphs: [String]) {
-        guard let textStorage = textView.textStorage else { return }
-        let theme = SyntaxTheme.default
-        let blockContext = layoutDelegate.blockContext
-
-        textStorage.beginEditing()
-        var offset = 0
-        for (index, para) in paragraphs.enumerated() {
-            let range = NSRange(location: offset, length: para.count)
-            offset += para.count + 1
-
-            guard indices.contains(index),
-                  range.location + range.length <= textStorage.length,
-                  range.length > 0 else { continue }
-
-            let isCodeBlockContent = blockContext.isInsideFencedCodeBlock(paragraphIndex: index).0
-            let isOpeningFence = blockContext.isOpeningFence(paragraphIndex: index).0
-            let isClosingFence = blockContext.isClosingFence(paragraphIndex: index)
-
-            if isCodeBlockContent || isOpeningFence || isClosingFence {
-                textStorage.addAttribute(.font, value: theme.codeFont, range: range)
-            } else {
-                // Reverted to non-code: apply correct font based on paragraph type
-                let tokens = layoutDelegate.tokenProvider.parse(para)
-                var applied = false
-                for token in tokens {
-                    switch token.element {
-                    case .heading(let level):
-                        let font = theme.headingFonts[level] ?? theme.bodyFont
-                        textStorage.addAttribute(.font, value: font, range: range)
-                        applied = true
-                    case .blockquote:
-                        textStorage.addAttribute(.font, value: theme.italicFont, range: range)
-                        applied = true
-                    default:
-                        break
-                    }
-                    if applied { break }
-                }
-                if !applied {
-                    textStorage.addAttribute(.font, value: theme.bodyFont, range: range)
-                }
-            }
-        }
-        textStorage.endEditing()
-    }
 
     /// Update block context by scanning all paragraphs. O(N) - for initialization only.
     private func updateBlockContextFull() {
