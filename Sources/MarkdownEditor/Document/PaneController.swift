@@ -112,6 +112,7 @@ final class PaneController: NSObject {
         let spid = OSSignpostID(log: Signposts.layout)
         os_signpost(.begin, log: Signposts.layout, name: Signposts.initAfterContentLoad, signpostID: spid)
         defer { os_signpost(.end, log: Signposts.layout, name: Signposts.initAfterContentLoad, signpostID: spid) }
+        defer { isInitializing = false }
 
         // Update block context FIRST so we know which paragraphs are code blocks
         PerfTimer.shared.measure("init.blockContext") {
@@ -133,9 +134,6 @@ final class PaneController: NSObject {
                 layoutManager.textContainer = textContainer
             }
         }
-
-        // Init complete — allow delegate callbacks to proceed normally
-        isInitializing = false
 
         // Print timing summary after init completes (only for file-backed documents)
         if let filePath = document?.filePath {
