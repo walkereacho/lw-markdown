@@ -76,7 +76,16 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
     /// Guard flag to suppress willProcessEditing during bulk content load.
     /// When true, `willProcessEditing` returns early — the work it does is
     /// redundant because `initializeAfterContentLoad()` applies all fonts afterward.
-    var isBulkLoading = false
+    private(set) var isBulkLoading = false
+
+    /// Execute a block with `willProcessEditing` suppressed.
+    /// Use during bulk content replacement where fonts will be applied afterward
+    /// by `initializeAfterContentLoad()`.
+    func withBulkLoadingSuppressed(_ block: () -> Void) {
+        isBulkLoading = true
+        defer { isBulkLoading = false }
+        block()
+    }
 
     /// Cursor position to restore after a paragraph type change.
     /// Set in `willProcessEditing` when type changes, cleared after restoration.
@@ -122,11 +131,9 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
 
         // Suppress willProcessEditing during bulk load — fonts are applied
         // afterward by initializeAfterContentLoad() → applyFontsToAllParagraphs().
-        isBulkLoading = true
-        defer { isBulkLoading = false }
-
-        // Set content via textStorage so NSTextView can access it
-        textStorage.setAttributedString(NSAttributedString(string: text))
+        withBulkLoadingSuppressed {
+            textStorage.setAttributedString(NSAttributedString(string: text))
+        }
 
         // Build paragraph cache now that text elements can be enumerated
         paragraphCache.rebuildFull()

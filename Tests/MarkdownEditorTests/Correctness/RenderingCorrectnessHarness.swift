@@ -53,14 +53,14 @@ final class RenderingCorrectnessHarness {
         // Suppress willProcessEditing during bulk text replacement — same
         // guard as production's applyPendingContent(). Fonts are applied
         // afterward by initializeAfterContentLoad().
-        documentModel.isBulkLoading = true
-        defer { documentModel.isBulkLoading = false }
-        textStorage.beginEditing()
-        textStorage.replaceCharacters(
-            in: NSRange(location: 0, length: textStorage.length),
-            with: markdown
-        )
-        textStorage.endEditing()
+        documentModel.withBulkLoadingSuppressed {
+            textStorage.beginEditing()
+            textStorage.replaceCharacters(
+                in: NSRange(location: 0, length: textStorage.length),
+                with: markdown
+            )
+            textStorage.endEditing()
+        }
         // Rebuild paragraph cache (matches DocumentModel.applyPendingContent)
         documentModel.paragraphCache.rebuildFull()
         // Initialize rendering state through production path:
