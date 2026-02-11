@@ -60,6 +60,7 @@ final class RenderingCorrectnessHarness {
         let paragraphs = textStorage.string.components(separatedBy: "\n")
         paneController.layoutDelegate.updateBlockContext(paragraphs: paragraphs)
         // Apply fonts to all paragraphs (matches PaneController.initializeAfterContentLoad)
+        paneController.applyFontsToAllParagraphs()
         forceLayout()
     }
 
@@ -224,6 +225,127 @@ final class RenderingCorrectnessHarness {
         XCTAssertEqual(freshIsCloseFence, storedIsCloseFence,
             "\(prefix): BlockContext stale — fresh scan says isClosingFence=\(freshIsCloseFence), stored says \(storedIsCloseFence)",
             file: file, line: line)
+    }
+
+    // MARK: - Layer 2: Font-Storage Consistency Assertions
+
+    /// Assert a paragraph's dominant storage font matches expected.
+    func assertStorageFont(
+        paragraph index: Int,
+        expected: NSFont,
+        context: String = "",
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        guard let range = paragraphNSRange(at: index),
+              range.length > 0 else {
+            // Empty paragraph — skip font check
+            return
+        }
+
+        let actualFont = textStorage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+        let prefix = "Paragraph \(index)\(context.isEmpty ? "" : " (\(context))")"
+
+        XCTAssertEqual(actualFont, expected,
+            "\(prefix): storage font mismatch — expected \(expected.fontName) \(expected.pointSize)pt, got \(actualFont?.fontName ?? "nil") \(actualFont?.pointSize ?? 0)pt",
+            file: file, line: line)
+    }
+
+    /// Derive expected font from document state and assert storage matches.
+    /// This is the key invariant check — it re-derives independently from scratch.
+    func assertStorageFontConsistent(
+        paragraph index: Int,
+        context: String = "",
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        guard let text = paragraphText(at: index) else { return }
+        if text.isEmpty { return }  // Skip empty paragraphs
+
+        let blockContext = paneController.layoutDelegate.blockContext
+
+        // 1. Code block content/fence overrides everything
+        let (isInside, _) = blockContext.isInsideFencedCodeBlock(paragraphIndex: index)
+        if isInside {
+            assertStorageFont(paragraph: index, expected: theme.codeFont,
+                context: "\(context) [code block content]", file: file, line: line)
+            return
+        }
+        let isOpenFence = blockContext.isOpeningFence(paragraphIndex: index).0
+        let isCloseFence = blockContext.isClosingFence(paragraphIndex: index)
+        if isOpenFence || isCloseFence {
+            assertStorageFont(paragraph: index, expected: theme.codeFont,
+                context: "\(context) [fence line]", file: file, line: line)
+            return
+        }
+
+        // 2. Parse tokens to determine paragraph type
+        let tokens = parser.parse(text)
+
+        for token in tokens {
+            switch token.element {
+            case .heading(let level):
+                let expectedFont = theme.headingFonts[level] ?? theme.bodyFont
+                assertStorageFont(paragraph: index, expected: expectedFont,
+                    context: "\(context) [heading \(level)]", file: file, line: line)
+                return
+            case .blockquote:
+                assertStorageFont(paragraph: index, expected: theme.italicFont,
+                    context: "\(context) [blockquote]", file: file, line: line)
+                return
+            default:
+                break
+            }
+        }
+
+        // 3. Default: body font
+        assertStorageFont(paragraph: index, expected: theme.bodyFont,
+            context: "\(context) [body]", file: file, line: line)
+    }
+
+    /// Assert inline formatting fonts are correct within a paragraph.
+    /// Checks that bold, italic, code spans have the right font in storage.
+    func assertInlineFontsConsistent(
+        paragraph index: Int,
+        context: String = "",
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        guard let text = paragraphText(at: index) else { return }
+        if text.isEmpty { return }
+
+        let blockContext = paneController.layoutDelegate.blockContext
+        // Skip font checks for code blocks — they use monospace throughout
+        let (isInside, _) = blockContext.isInsideFencedCodeBlock(paragraphIndex: index)
+        if isInside || blockContext.isOpeningFence(paragraphIndex: index).0 ||
+           blockContext.isClosingFence(paragraphIndex: index) {
+            return
+        }
+
+        // Skip heading and blockquote paragraphs (they use block-level fonts)
+        let tokens = parser.parse(text)
+        for token in tokens {
+            if case .heading = token.element { return }
+            if case .blockquote = token.element { return }
+        }
+
+        guard let nsRange = paragraphNSRange(at: index) else { return }
+        let paragraphOffset = nsRange.location
+        let prefix = "Paragraph \(index)\(context.isEmpty ? "" : " (\(context))")"
+
+        for token in tokens {
+            guard let expectedFont = theme.fontForInlineElement(token.element) else { continue }
+
+            let start = paragraphOffset + token.contentRange.lowerBound
+            let length = token.contentRange.count
+            guard start >= 0, start + length <= textStorage.length, length > 0 else { continue }
+
+            let actualFont = textStorage.attribute(.font, at: start, effectiveRange: nil) as? NSFont
+
+            XCTAssertEqual(actualFont, expectedFont,
+                "\(prefix): inline \(token.element) font mismatch at content offset \(token.contentRange) — expected \(expectedFont.fontName), got \(actualFont?.fontName ?? "nil")",
+                file: file, line: line)
+        }
     }
 
     // MARK: - Private Helpers

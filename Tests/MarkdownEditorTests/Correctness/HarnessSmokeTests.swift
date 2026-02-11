@@ -73,4 +73,35 @@ final class HarnessSmokeTests: XCTestCase {
             harness.assertBlockContextConsistent(paragraph: i)
         }
     }
+
+    // MARK: - Layer 2: Font-Storage Consistency
+
+    func testStorageFontConsistencyForHeadings() {
+        let harness = RenderingCorrectnessHarness()
+        harness.setText("# H1\n## H2\n### H3\nBody\n")
+        harness.forceLayout()
+
+        harness.assertStorageFontConsistent(paragraph: 0)  // H1
+        harness.assertStorageFontConsistent(paragraph: 1)  // H2
+        harness.assertStorageFontConsistent(paragraph: 2)  // H3
+        harness.assertStorageFontConsistent(paragraph: 3)  // Body
+    }
+
+    func testStorageFontConsistencyForCodeBlocks() {
+        let harness = RenderingCorrectnessHarness()
+        harness.setText("Text\n```\ncode line\n```\nMore text\n")
+        harness.forceLayout()
+
+        for i in 0..<harness.paragraphCount {
+            harness.assertStorageFontConsistent(paragraph: i)
+        }
+    }
+
+    func testInlineFontConsistency() {
+        let harness = RenderingCorrectnessHarness()
+        harness.setText("This has **bold** and `code` inline.\n")
+        harness.forceLayout()
+
+        harness.assertInlineFontsConsistent(paragraph: 0)
+    }
 }

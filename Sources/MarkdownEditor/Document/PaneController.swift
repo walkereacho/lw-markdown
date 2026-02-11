@@ -1,4 +1,5 @@
 import AppKit
+import os.signpost
 
 /// Controller for a single editor pane.
 ///
@@ -102,25 +103,47 @@ final class PaneController: NSObject {
     /// Initialize rendering state after content is loaded.
     /// Sets up fonts and active paragraph for correct initial display.
     private func initializeAfterContentLoad() {
+        let spid = OSSignpostID(log: Signposts.layout)
+        os_signpost(.begin, log: Signposts.layout, name: Signposts.initAfterContentLoad, signpostID: spid)
+        defer { os_signpost(.end, log: Signposts.layout, name: Signposts.initAfterContentLoad, signpostID: spid) }
+
         // Update block context FIRST so we know which paragraphs are code blocks
-        updateBlockContextFull()
+        PerfTimer.shared.measure("init.blockContext") {
+            updateBlockContextFull()
+        }
 
         // Apply fonts for all paragraph types so TextKit 2 calculates correct metrics (O(N) on load only)
-        applyFontsToAllParagraphs()
+        PerfTimer.shared.measure("init.applyFonts") {
+            applyFontsToAllParagraphs()
+        }
 
         // Set initial active paragraph to 0 (cursor starts at beginning)
         activeParagraphIndex = 0
 
         // Force layout fragment recreation
-        if let textContainer = layoutManager.textContainer {
-            layoutManager.textContainer = nil
-            layoutManager.textContainer = textContainer
+        PerfTimer.shared.measure("init.fragmentRecreation") {
+            if let textContainer = layoutManager.textContainer {
+                layoutManager.textContainer = nil
+                layoutManager.textContainer = textContainer
+            }
+        }
+
+        // Print timing summary after init completes (only for file-backed documents)
+        if let filePath = document?.filePath {
+            let docLabel = filePath.lastPathComponent
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                PerfTimer.shared.printSummary(label: docLabel)
+            }
         }
     }
 
     /// Update block context incrementally from the edited paragraph. O(K).
     /// Compares old vs new context and invalidates paragraphs whose code-block status changed.
     private func updateBlockContext() {
+        let spid = OSSignpostID(log: Signposts.layout)
+        os_signpost(.begin, log: Signposts.layout, name: Signposts.blockContextUpdate, signpostID: spid)
+        defer { os_signpost(.end, log: Signposts.layout, name: Signposts.blockContextUpdate, signpostID: spid) }
+
         guard let text = textView.textStorage?.string else { return }
         let paragraphs = text.components(separatedBy: "\n")
 
@@ -211,7 +234,7 @@ final class PaneController: NSObject {
 
     /// Apply fonts to ALL paragraphs based on their type. O(N) - only for initialization.
     /// Handles headings, code blocks, blockquotes, and lists.
-    private func applyFontsToAllParagraphs() {
+    func applyFontsToAllParagraphs() {
         guard !isApplyingHeadingFonts else { return }
         guard document != nil,
               let textStorage = textView.textStorage else { return }
@@ -352,6 +375,10 @@ final class PaneController: NSObject {
     }
 
     private func updateActiveParagraph() {
+        let spid = OSSignpostID(log: Signposts.layout)
+        os_signpost(.begin, log: Signposts.layout, name: Signposts.activeParagraphSwitch, signpostID: spid)
+        defer { os_signpost(.end, log: Signposts.layout, name: Signposts.activeParagraphSwitch, signpostID: spid) }
+
         guard let document = document,
               let location = cursorTextLocation else { return }
 
@@ -371,6 +398,10 @@ final class PaneController: NSObject {
     /// Invalidate layout for a specific paragraph to force fragment recreation.
     /// Uses content storage notification to trigger delegate callback.
     private func invalidateParagraphDisplay(at index: Int?) {
+        let spid = OSSignpostID(log: Signposts.layout)
+        os_signpost(.begin, log: Signposts.layout, name: Signposts.invalidateParagraph, signpostID: spid, "para=%d", index ?? -1)
+        defer { os_signpost(.end, log: Signposts.layout, name: Signposts.invalidateParagraph, signpostID: spid) }
+
         guard let index = index,
               let document = document,
               let range = document.paragraphRange(at: index) else { return }
@@ -427,6 +458,9 @@ extension PaneController: NSTextViewDelegate {
         // Skip if this is just a display invalidation, not an actual text change
         guard !isInvalidatingDisplay else { return }
 
+        let spid = OSSignpostID(log: Signposts.editing)
+        os_signpost(.begin, log: Signposts.editing, name: Signposts.textDidChange, signpostID: spid)
+
         // Notify document of content change for cache invalidation
         let range = document?.contentStorage.documentRange ?? layoutManager.documentRange
         document?.contentDidChange(in: range, changeInLength: 0)
@@ -446,5 +480,7 @@ extension PaneController: NSTextViewDelegate {
 
         // Scroll to keep cursor visible
         textView.scrollRangeToVisible(textView.selectedRange())
+
+        os_signpost(.end, log: Signposts.editing, name: Signposts.textDidChange, signpostID: spid)
     }
 }
