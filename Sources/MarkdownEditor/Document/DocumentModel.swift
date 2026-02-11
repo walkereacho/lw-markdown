@@ -344,6 +344,63 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
             theme.applyInlineFormattingFonts(to: textStorage, tokens: tokens, paragraphOffset: paragraphRange.location)
         }
 
+        // When a newline splits a paragraph, the next paragraph inherits the
+        // original font but may be a different type (e.g., heading split produces
+        // body text). Evaluate and apply correct font to the next paragraph.
+        let nextParaStart = paragraphRange.location + paragraphRange.length
+        if nextParaStart < textStorage.length {
+            let nextParagraphRange = (text as NSString).paragraphRange(for: NSRange(location: nextParaStart, length: 0))
+            guard nextParagraphRange.length > 0 else { return }
+
+            let nextParagraphText = (text as NSString).substring(with: nextParagraphRange)
+            let nextTrimmed = nextParagraphText.trimmingCharacters(in: .newlines)
+            guard !nextTrimmed.isEmpty else { return }
+
+            let nextCodeBlockStatus = detectCodeBlockStatus(at: nextParagraphRange.location, in: text)
+            let nextTokens = MarkdownParser.shared.parse(nextTrimmed)
+
+            let nextFont: NSFont
+            if nextCodeBlockStatus != .notInCodeBlock {
+                nextFont = theme.codeFont
+            } else if let level = nextTokens.compactMap({ token -> Int? in
+                if case .heading(let l) = token.element { return l }; return nil
+            }).first {
+                nextFont = theme.headingFonts[level] ?? theme.bodyFont
+            } else if nextTokens.contains(where: { if case .blockquote = $0.element { return true }; return false }) {
+                nextFont = theme.italicFont
+            } else {
+                nextFont = theme.bodyFont
+            }
+
+            var nextAttributeRange = nextParagraphRange
+            if nextParagraphText.hasSuffix("\n") {
+                nextAttributeRange.length -= 1
+            }
+            if nextAttributeRange.length > 0 {
+                textStorage.addAttribute(.font, value: nextFont, range: nextAttributeRange)
+
+                // Determine next paragraph type for paragraph style
+                let nextType: ParagraphType
+                if nextCodeBlockStatus != .notInCodeBlock {
+                    nextType = .codeBlock
+                } else if nextTokens.contains(where: { if case .unorderedListItem = $0.element { return true }; return false }) {
+                    nextType = .unorderedList(depth: 1)
+                } else if nextTokens.contains(where: { if case .orderedListItem = $0.element { return true }; return false }) {
+                    nextType = .orderedList(depth: 1)
+                } else if nextTokens.contains(where: { if case .blockquote = $0.element { return true }; return false }) {
+                    nextType = .blockquote
+                } else {
+                    nextType = .body
+                }
+
+                if let nextStyle = paragraphStyleForType(nextType) {
+                    textStorage.addAttribute(.paragraphStyle, value: nextStyle, range: nextAttributeRange)
+                } else {
+                    textStorage.removeAttribute(.paragraphStyle, range: nextAttributeRange)
+                }
+            }
+        }
+
     }
 
     /// Total indent for list items - must match MarkdownLayoutFragment.listIndent
