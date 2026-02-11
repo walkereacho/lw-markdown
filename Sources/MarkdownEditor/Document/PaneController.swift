@@ -101,8 +101,9 @@ final class PaneController: NSObject {
     }
 
     /// Initialize rendering state after content is loaded.
-    /// Sets up fonts and active paragraph for correct initial display.
-    private func initializeAfterContentLoad() {
+    /// Sets up block context, fonts, active paragraph, and forces fragment recreation.
+    // internal for @testable access — used by test harness setText()
+    func initializeAfterContentLoad() {
         let spid = OSSignpostID(log: Signposts.layout)
         os_signpost(.begin, log: Signposts.layout, name: Signposts.initAfterContentLoad, signpostID: spid)
         defer { os_signpost(.end, log: Signposts.layout, name: Signposts.initAfterContentLoad, signpostID: spid) }
@@ -236,8 +237,7 @@ final class PaneController: NSObject {
 
     /// Apply fonts to ALL paragraphs based on their type. O(N) - only for initialization.
     /// Handles headings, code blocks, blockquotes, and lists.
-    // internal for @testable access — not intended for external callers
-    func applyFontsToAllParagraphs() {
+    private func applyFontsToAllParagraphs() {
         guard !isApplyingHeadingFonts else { return }
         guard document != nil,
               let textStorage = textView.textStorage else { return }

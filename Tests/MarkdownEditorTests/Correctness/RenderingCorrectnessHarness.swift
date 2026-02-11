@@ -47,20 +47,25 @@ final class RenderingCorrectnessHarness {
     }
 
     /// Set document content directly.
+    /// Uses the production init path (initializeAfterContentLoad) rather than
+    /// replicating internal steps, so tests exercise the same code path as real usage.
     func setText(_ markdown: String) {
-        textStorage.beginEditing()
-        textStorage.replaceCharacters(
-            in: NSRange(location: 0, length: textStorage.length),
-            with: markdown
-        )
-        textStorage.endEditing()
-        // Rebuild paragraph cache after full replacement
+        // Suppress willProcessEditing during bulk text replacement — same
+        // guard as production's applyPendingContent(). Fonts are applied
+        // afterward by initializeAfterContentLoad().
+        documentModel.withBulkLoadingSuppressed {
+            textStorage.beginEditing()
+            textStorage.replaceCharacters(
+                in: NSRange(location: 0, length: textStorage.length),
+                with: markdown
+            )
+            textStorage.endEditing()
+        }
+        // Rebuild paragraph cache (matches DocumentModel.applyPendingContent)
         documentModel.paragraphCache.rebuildFull()
-        // Update block context
-        let paragraphs = textStorage.string.components(separatedBy: "\n")
-        paneController.layoutDelegate.updateBlockContext(paragraphs: paragraphs)
-        // Apply fonts to all paragraphs (matches PaneController.initializeAfterContentLoad)
-        paneController.applyFontsToAllParagraphs()
+        // Initialize rendering state through production path:
+        // block context → fonts → active paragraph → fragment recreation
+        paneController.initializeAfterContentLoad()
         forceLayout()
     }
 

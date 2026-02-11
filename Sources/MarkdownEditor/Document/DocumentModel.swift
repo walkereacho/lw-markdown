@@ -73,6 +73,20 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
     /// Content loaded from file, waiting to be applied after layout is ready.
     private var pendingContent: String?
 
+    /// Guard flag to suppress willProcessEditing during bulk content load.
+    /// When true, `willProcessEditing` returns early — the work it does is
+    /// redundant because `initializeAfterContentLoad()` applies all fonts afterward.
+    private(set) var isBulkLoading = false
+
+    /// Execute a block with `willProcessEditing` suppressed.
+    /// Use during bulk content replacement where fonts will be applied afterward
+    /// by `initializeAfterContentLoad()`.
+    func withBulkLoadingSuppressed(_ block: () -> Void) {
+        isBulkLoading = true
+        defer { isBulkLoading = false }
+        block()
+    }
+
     /// Cursor position to restore after a paragraph type change.
     /// Set in `willProcessEditing` when type changes, cleared after restoration.
     /// The position is where cursor SHOULD be after the edit completes.
@@ -115,8 +129,11 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         guard let text = pendingContent else { return }
         pendingContent = nil
 
-        // Set content via textStorage so NSTextView can access it
-        textStorage.setAttributedString(NSAttributedString(string: text))
+        // Suppress willProcessEditing during bulk load — fonts are applied
+        // afterward by initializeAfterContentLoad() → applyFontsToAllParagraphs().
+        withBulkLoadingSuppressed {
+            textStorage.setAttributedString(NSAttributedString(string: text))
+        }
 
         // Build paragraph cache now that text elements can be enumerated
         paragraphCache.rebuildFull()
@@ -215,6 +232,9 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
     ) {
         // Only process if characters changed (not just attributes)
         guard editedMask.contains(.editedCharacters) else { return }
+
+        // Skip during bulk load — fonts will be applied by initializeAfterContentLoad()
+        guard !isBulkLoading else { return }
 
         let spid = OSSignpostID(log: Signposts.editing)
         os_signpost(.begin, log: Signposts.editing, name: Signposts.willProcessEditing, signpostID: spid)
