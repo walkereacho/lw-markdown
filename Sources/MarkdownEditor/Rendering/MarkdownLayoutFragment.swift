@@ -36,17 +36,16 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     /// Theme for visual styling.
     let theme: SyntaxTheme
 
-    /// Compute paragraph index dynamically at draw time.
-    /// This ensures correct index even when paragraphs are inserted/deleted.
-    /// Uses the fragment's text location to query the document's paragraph cache.
-    private var currentParagraphIndex: Int? {
-        guard let location = textElement?.elementRange?.location,
-              let document = paneController?.document else {
-            return nil
-        }
-        return document.paragraphIndex(for: location)
-    }
+    /// Paragraph index computed once at fragment creation time.
+    /// Fragments are recreated on invalidation, so this is always fresh.
+    let paragraphIndex: Int?
 
+    /// Code block info computed once at fragment creation time.
+    /// Avoids O(B) BlockContext lookups on every draw call.
+    let cachedCodeBlockInfo: CodeBlockInfo?
+
+    /// Cached rendering surface bounds to avoid recomputation.
+    private var _cachedRenderingSurfaceBounds: CGRect?
 
     // MARK: - Initialization
 
@@ -54,10 +53,14 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         textElement: NSTextElement,
         range: NSTextRange?,
         tokens: [MarkdownToken],
+        paragraphIndex: Int?,
+        codeBlockInfo: CodeBlockInfo?,
         paneController: PaneController?,
         theme: SyntaxTheme
     ) {
         self.tokens = tokens
+        self.paragraphIndex = paragraphIndex
+        self.cachedCodeBlockInfo = codeBlockInfo
         self.paneController = paneController
         self.theme = theme
         super.init(textElement: textElement, range: range)
@@ -70,7 +73,16 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
     // MARK: - Layout Bounds
 
     /// Override to provide bounds that accommodate larger fonts (headings), full-width horizontal rules, and code block backgrounds.
+    /// Result is cached since it depends only on immutable properties (tokens, paragraph index, theme)
+    /// and text container size (constant during a layout pass).
     override var renderingSurfaceBounds: CGRect {
+        if let cached = _cachedRenderingSurfaceBounds { return cached }
+        let result = computeRenderingSurfaceBounds()
+        _cachedRenderingSurfaceBounds = result
+        return result
+    }
+
+    private func computeRenderingSurfaceBounds() -> CGRect {
         let baseBounds = super.renderingSurfaceBounds
 
         // Find the maximum line height needed based on tokens
@@ -90,8 +102,8 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
             }
         }
 
-        // Code blocks need full width for background
-        if let idx = currentParagraphIndex, paneController?.codeBlockInfo(at: idx) != nil {
+        // Code blocks need full width for background (use cached info instead of O(B) lookup)
+        if cachedCodeBlockInfo != nil {
             needsFullWidth = true
         }
 
@@ -131,8 +143,8 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
         let drawStart = CACurrentMediaTime()
         defer { PerfTimer.shared.record("draw", ms: (CACurrentMediaTime() - drawStart) * 1000) }
 
-        // Cache paragraph index once — used for active state and code block info
-        let paraIndex = currentParagraphIndex
+        // Use stored paragraph index — computed once at fragment creation time (O(1))
+        let paraIndex = paragraphIndex
         let active = paraIndex.map { paneController?.isActiveParagraph(at: $0) ?? false } ?? false
 
         let drawSpid = OSSignpostID(log: Signposts.rendering)
@@ -144,9 +156,8 @@ final class MarkdownLayoutFragment: NSTextLayoutFragment {
 
         let text = paragraph.attributedString.string
 
-        // Check if this is part of a fenced code block
-        let codeInfo = paraIndex.flatMap { paneController?.codeBlockInfo(at: $0) }
-        if let codeInfo = codeInfo {
+        // Check if this is part of a fenced code block (use cached info, O(1))
+        if let codeInfo = cachedCodeBlockInfo {
             switch codeInfo {
             case .openingFence(let language):
                 os_signpost(.begin, log: Signposts.rendering, name: Signposts.draw, signpostID: drawSpid, "fence-open para=%d active=%d", paraIndex ?? -1, active ? 1 : 0)

@@ -15,6 +15,8 @@ final class MarkdownLayoutFragmentProvider: LayoutFragmentProviding {
             textElement: paragraph,
             range: range,
             tokens: tokens,
+            paragraphIndex: nil,
+            codeBlockInfo: nil,
             paneController: paneController,
             theme: theme
         )
