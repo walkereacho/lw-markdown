@@ -6,6 +6,8 @@ import XCTest
 /// Any new fixture added to Tests/Fixtures/ should be added to the list.
 final class FixtureSmokeTests: XCTestCase {
 
+    // UPDATE THIS LIST when adding new fixtures to Tests/Fixtures/.
+    // Excludes perf-*.md fixtures (large files not intended for correctness testing).
     static let fixtures = [
         "headings",
         "inline-formatting",

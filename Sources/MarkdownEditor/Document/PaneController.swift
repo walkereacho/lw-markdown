@@ -284,6 +284,7 @@ final class PaneController: NSObject {
 
     /// Apply fonts to ALL paragraphs based on their type. O(N) - only for initialization.
     /// Handles headings, code blocks, blockquotes, and lists.
+    // internal for @testable access — not intended for external callers
     func applyFontsToAllParagraphs() {
         guard !isApplyingHeadingFonts else { return }
         guard document != nil,

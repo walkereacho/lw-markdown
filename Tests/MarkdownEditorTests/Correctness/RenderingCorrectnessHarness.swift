@@ -106,7 +106,7 @@ final class RenderingCorrectnessHarness {
         textView.setSelectedRange(NSRange(location: storagePos, length: 0))
         // Trigger selection change handling synchronously
         paneController.handleSelectionChange()
-        // Process the debounced timer immediately
+        // Drain the debounced timer — must exceed PaneController.cursorDebounceInterval (0.016s)
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
     }
 
