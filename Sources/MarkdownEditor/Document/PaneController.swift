@@ -160,18 +160,18 @@ final class PaneController: NSObject {
             layoutDelegate.updateBlockContext(paragraphs: paragraphs)
         }
 
-        // Find paragraphs whose code-block status changed
+        // Find paragraphs whose code-block status changed.
+        // Note: paragraphsWithChangedCodeBlockStatus compares by index position, which is
+        // unreliable after insertions/deletions shift paragraph indices. When any code block
+        // boundary changes, reapply fonts to all paragraphs to ensure correctness.
         let newBlockContext = layoutDelegate.blockContext
         let affectedParagraphs = newBlockContext.paragraphsWithChangedCodeBlockStatus(
             comparedTo: oldBlockContext,
             paragraphCount: paragraphs.count
         )
 
-        // Apply correct fonts to affected paragraphs and invalidate for fragment recreation.
-        // willProcessEditing only handles .editedCharacters, so font cascading must be done
-        // directly here when code-block boundaries change.
         if !affectedParagraphs.isEmpty {
-            applyFontsToParagraphs(affectedParagraphs, paragraphs: paragraphs)
+            applyFontsToAllParagraphs()
             invalidateParagraphsDisplay(affectedParagraphs)
         }
     }
