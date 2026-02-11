@@ -22,41 +22,44 @@ final class ParagraphIndexCache {
 
     // MARK: - Lookup (O(log N) via binary search)
 
-    /// Find paragraph index for a text location using raw text analysis.
-    /// Paragraph N = text after the Nth newline (paragraph 0 = text before first newline)
+    /// Find paragraph index for a text location using binary search over cached paragraph ranges.
+    /// Falls back to linear scan only when the cache is empty.
     func paragraphIndex(for location: NSTextLocation) -> Int? {
-        guard let storage = contentStorage,
-              let text = storage.attributedString?.string else {
-            return nil
-        }
+        guard let storage = contentStorage else { return nil }
+
         let cursorOffset = storage.offset(from: storage.documentRange.location, to: location)
 
-        // Empty document = paragraph 0
-        if text.isEmpty {
-            return 0
+        // Use binary search over paragraphRanges when available (O(log N))
+        if !paragraphRanges.isEmpty {
+            var lo = 0
+            var hi = paragraphRanges.count - 1
+            while lo <= hi {
+                let mid = (lo + hi) / 2
+                let range = paragraphRanges[mid].range
+                let rangeStart = storage.offset(from: storage.documentRange.location, to: range.location)
+                let rangeEnd = storage.offset(from: storage.documentRange.location, to: range.endLocation)
+                if cursorOffset < rangeStart {
+                    hi = mid - 1
+                } else if cursorOffset >= rangeEnd {
+                    lo = mid + 1
+                } else {
+                    return paragraphRanges[mid].index
+                }
+            }
+            // Cursor is beyond all paragraph ranges (e.g. trailing newline)
+            return nil
         }
 
-        // Cursor beyond text = on empty new line, no active paragraph
+        // Fallback: linear scan when cache is empty (e.g. before first rebuildFull)
+        guard let text = storage.attributedString?.string else { return nil }
+
+        if text.isEmpty { return 0 }
+
         if cursorOffset >= text.count {
-            // Check if last char is newline - if so, we're on empty line after it
-            if text.last == "\n" {
-                return nil
-            }
-            // Otherwise cursor is at end of last line (no trailing newline)
+            if text.last == "\n" { return nil }
             return text.filter { $0 == "\n" }.count
         }
 
-        // Check if char before cursor is newline (we're at start of a line)
-        if cursorOffset > 0 {
-            let idx = text.index(text.startIndex, offsetBy: cursorOffset - 1)
-            if text[idx] == "\n" {
-                // We're at position 0 of a new line
-                // Paragraph index = number of newlines before cursor
-                return text.prefix(cursorOffset).filter { $0 == "\n" }.count
-            }
-        }
-
-        // Normal case: count newlines before cursor position
         return text.prefix(cursorOffset).filter { $0 == "\n" }.count
     }
 

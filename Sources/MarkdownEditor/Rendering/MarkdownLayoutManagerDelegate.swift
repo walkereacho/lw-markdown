@@ -65,11 +65,17 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
             tokenProvider.parse(text)
         }
 
-        // Return custom fragment (computes paragraph index at draw time for correct code block status)
+        // Compute paragraph index and code block info ONCE at creation time.
+        // Fragments are recreated on invalidation, so these values are always fresh.
+        let paragraphIndex = pane.document?.paragraphIndex(for: location)
+        let codeBlockInfo = paragraphIndex.flatMap { pane.codeBlockInfo(at: $0) }
+
         return MarkdownLayoutFragment(
             textElement: paragraph,
             range: paragraph.elementRange,
             tokens: tokens,
+            paragraphIndex: paragraphIndex,
+            codeBlockInfo: codeBlockInfo,
             paneController: pane,
             theme: theme
         )
