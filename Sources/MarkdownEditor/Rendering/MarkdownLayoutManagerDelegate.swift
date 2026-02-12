@@ -72,6 +72,13 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
                 doc.tokensForParagraph(text: text, at: idx)
             }
         } else {
+            #if DEBUG
+            if paragraphIndex == nil {
+                os_log("Token cache bypassed: paragraphIndex was nil for fragment at %{public}@",
+                       log: Signposts.rendering, type: .debug,
+                       String(describing: location))
+            }
+            #endif
             tokens = PerfTimer.shared.measure("parse") {
                 tokenProvider.parse(text)
             }

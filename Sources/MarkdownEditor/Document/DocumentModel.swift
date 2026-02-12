@@ -63,7 +63,7 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
 
     /// Cache of parsed Markdown tokens — avoids redundant parsing of the same paragraph text.
     /// Shared across all call sites (willProcessEditing, applyFontsToAllParagraphs, fragment creation).
-    private(set) var tokenCache = MarkdownTokenCache()
+    private let tokenCache = MarkdownTokenCache()
 
     /// Document revision counter — incremented on every edit.
     private(set) var revision: UInt64 = 0
@@ -288,9 +288,9 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         // Check if this paragraph is inside a code block
         let codeBlockStatus = detectCodeBlockStatus(at: paragraphRange.location, in: text)
 
-        // Compute paragraph index from character offset for cache keying.
-        // Count newlines before the paragraph start to determine its index.
-        let currentParagraphIndex = text.prefix(paragraphRange.location).filter { $0 == "\n" }.count
+        // Compute paragraph index via binary search over cached ranges (O(log N)).
+        let currentParagraphIndex = paragraphCache.paragraphIndex(forCharacterOffset: paragraphRange.location)
+            ?? text.prefix(paragraphRange.location).filter { $0 == "\n" }.count
 
         // Parse to determine current paragraph type (only if not in code block)
         let tokens = tokensForParagraph(text: trimmedText, at: currentParagraphIndex)

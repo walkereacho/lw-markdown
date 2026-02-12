@@ -3,10 +3,13 @@ import AppKit
 /// Maintains paragraph range mappings for O(log N) lookups.
 ///
 /// TextKit 2 uses `NSTextRange`/`NSTextLocation` instead of `NSRange`.
-/// This cache maps paragraph indices to their text ranges.
+/// This cache maps paragraph indices to their text ranges, and pre-computes
+/// integer offsets for fast binary search without framework calls.
 final class ParagraphIndexCache {
 
     private var paragraphRanges: [(range: NSTextRange, index: Int)] = []
+    /// Pre-computed integer offsets for O(log N) binary search without storage.offset() calls.
+    private var integerRanges: [(start: Int, end: Int)] = []
     private var documentVersion: Int = 0
 
     private weak var contentStorage: NSTextContentStorage?
@@ -22,32 +25,16 @@ final class ParagraphIndexCache {
 
     // MARK: - Lookup (O(log N) via binary search)
 
-    /// Find paragraph index for a text location using binary search over cached paragraph ranges.
+    /// Find paragraph index for a text location using binary search over pre-computed integer offsets.
     /// Falls back to linear scan only when the cache is empty.
     func paragraphIndex(for location: NSTextLocation) -> Int? {
         guard let storage = contentStorage else { return nil }
 
         let cursorOffset = storage.offset(from: storage.documentRange.location, to: location)
 
-        // Use binary search over paragraphRanges when available (O(log N))
-        if !paragraphRanges.isEmpty {
-            var lo = 0
-            var hi = paragraphRanges.count - 1
-            while lo <= hi {
-                let mid = (lo + hi) / 2
-                let range = paragraphRanges[mid].range
-                let rangeStart = storage.offset(from: storage.documentRange.location, to: range.location)
-                let rangeEnd = storage.offset(from: storage.documentRange.location, to: range.endLocation)
-                if cursorOffset < rangeStart {
-                    hi = mid - 1
-                } else if cursorOffset >= rangeEnd {
-                    lo = mid + 1
-                } else {
-                    return paragraphRanges[mid].index
-                }
-            }
-            // Cursor is beyond all paragraph ranges (e.g. trailing newline)
-            return nil
+        // Use binary search over pre-computed integer offsets (O(log N), no framework calls)
+        if !integerRanges.isEmpty {
+            return paragraphIndex(forCharacterOffset: cursorOffset)
         }
 
         // Fallback: linear scan when cache is empty (e.g. before first rebuildFull)
@@ -61,6 +48,28 @@ final class ParagraphIndexCache {
         }
 
         return text.prefix(cursorOffset).filter { $0 == "\n" }.count
+    }
+
+    /// Find paragraph index for a character offset using binary search over pre-computed ranges.
+    /// Use this from contexts that have NSRange offsets (e.g., willProcessEditing) to avoid
+    /// the O(N) newline-counting approach.
+    func paragraphIndex(forCharacterOffset offset: Int) -> Int? {
+        guard !integerRanges.isEmpty else { return nil }
+
+        var lo = 0
+        var hi = integerRanges.count - 1
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            let range = integerRanges[mid]
+            if offset < range.start {
+                hi = mid - 1
+            } else if offset >= range.end {
+                lo = mid + 1
+            } else {
+                return mid
+            }
+        }
+        return nil
     }
 
     /// Get text range for a paragraph index.
@@ -83,12 +92,17 @@ final class ParagraphIndexCache {
         guard let storage = contentStorage else { return }
 
         paragraphRanges.removeAll()
+        integerRanges.removeAll()
         var index = 0
+        let docStart = storage.documentRange.location
 
-        storage.enumerateTextElements(from: storage.documentRange.location) { element in
+        storage.enumerateTextElements(from: docStart) { element in
             if let paragraph = element as? NSTextParagraph,
                let range = paragraph.elementRange {
                 self.paragraphRanges.append((range: range, index: index))
+                let start = storage.offset(from: docStart, to: range.location)
+                let end = storage.offset(from: docStart, to: range.endLocation)
+                self.integerRanges.append((start: start, end: end))
                 index += 1
             }
             return true  // Continue enumeration
