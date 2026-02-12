@@ -61,13 +61,21 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
         let rawText = paragraph.attributedString.string
         let text = rawText.trimmingCharacters(in: .newlines)
 
-        let tokens = PerfTimer.shared.measure("parse") {
-            tokenProvider.parse(text)
-        }
-
         // Compute paragraph index and code block info ONCE at creation time.
         // Fragments are recreated on invalidation, so these values are always fresh.
         let paragraphIndex = pane.document?.paragraphIndex(for: location)
+
+        // Use cached tokens when paragraph index is available; fall back to direct parse
+        let tokens: [MarkdownToken]
+        if let idx = paragraphIndex, let doc = pane.document {
+            tokens = PerfTimer.shared.measure("parse") {
+                doc.tokensForParagraph(text: text, at: idx)
+            }
+        } else {
+            tokens = PerfTimer.shared.measure("parse") {
+                tokenProvider.parse(text)
+            }
+        }
         let codeBlockInfo = paragraphIndex.flatMap { pane.codeBlockInfo(at: $0) }
 
         return MarkdownLayoutFragment(
