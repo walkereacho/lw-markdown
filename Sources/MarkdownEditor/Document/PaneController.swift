@@ -245,7 +245,7 @@ final class PaneController: NSObject {
     /// Handles headings, code blocks, blockquotes, and lists.
     private func applyFontsToAllParagraphs() {
         guard !isApplyingHeadingFonts else { return }
-        guard document != nil,
+        guard let document = document,
               let textStorage = textView.textStorage else { return }
 
         isApplyingHeadingFonts = true
@@ -283,8 +283,8 @@ final class PaneController: NSObject {
                 // Code block: apply monospace font
                 textStorage.addAttribute(.font, value: theme.codeFont, range: range)
             } else {
-                // Parse for other block-level elements
-                let tokens = layoutDelegate.tokenProvider.parse(para)
+                // Parse for other block-level elements (cached)
+                let tokens = document.tokensForParagraph(text: para, at: index)
 
                 var isBlockElement = false
                 for token in tokens {

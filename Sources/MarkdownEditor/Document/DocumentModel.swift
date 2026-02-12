@@ -61,6 +61,10 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         ParagraphIndexCache(contentStorage: contentStorage)
     }()
 
+    /// Cache of parsed Markdown tokens — avoids redundant parsing of the same paragraph text.
+    /// Shared across all call sites (willProcessEditing, applyFontsToAllParagraphs, fragment creation).
+    private let tokenCache = MarkdownTokenCache()
+
     /// Document revision counter — incremented on every edit.
     private(set) var revision: UInt64 = 0
 
@@ -178,6 +182,19 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         paragraphCache.paragraphIndex(for: location)
     }
 
+    // MARK: - Token Cache
+
+    /// Parse tokens for a paragraph, using the cache when possible.
+    /// This is the single entry point for all token parsing to avoid redundant work.
+    func tokensForParagraph(text: String, at paragraphIndex: Int) -> [MarkdownToken] {
+        if let cached = tokenCache.tokens(forParagraphAt: paragraphIndex, text: text) {
+            return cached
+        }
+        let tokens = MarkdownParser.shared.parse(text)
+        tokenCache.store(tokens: tokens, forParagraphAt: paragraphIndex, text: text)
+        return tokens
+    }
+
     // MARK: - Save
 
     /// Save document to its file path.
@@ -198,6 +215,17 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         revision += 1
         isDirty = true
         paragraphCache.didProcessEditing(in: editedRange, changeInLength: delta)
+
+        // Invalidate token cache for affected paragraphs
+        if let index = paragraphIndex(for: editedRange.location) {
+            if delta != 0 {
+                // Insert/delete: indices after edit point shift
+                tokenCache.invalidateFrom(index: index)
+            } else {
+                // In-place edit: only this paragraph changes
+                tokenCache.invalidate(paragraphAt: index)
+            }
+        }
     }
 
     // MARK: - Private Helpers
@@ -260,8 +288,12 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         // Check if this paragraph is inside a code block
         let codeBlockStatus = detectCodeBlockStatus(at: paragraphRange.location, in: text)
 
+        // Compute paragraph index via binary search over cached ranges (O(log N)).
+        let currentParagraphIndex = paragraphCache.paragraphIndex(forCharacterOffset: paragraphRange.location)
+            ?? text.prefix(paragraphRange.location).filter { $0 == "\n" }.count
+
         // Parse to determine current paragraph type (only if not in code block)
-        let tokens = MarkdownParser.shared.parse(trimmedText)
+        let tokens = tokensForParagraph(text: trimmedText, at: currentParagraphIndex)
 
         // Extract element types from tokens
         let currentHeadingLevel: Int? = codeBlockStatus == .notInCodeBlock ? tokens.compactMap { token -> Int? in
@@ -377,7 +409,8 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
             guard !nextTrimmed.isEmpty else { return }
 
             let nextCodeBlockStatus = detectCodeBlockStatus(at: nextParagraphRange.location, in: text)
-            let nextTokens = MarkdownParser.shared.parse(nextTrimmed)
+            let nextParagraphIndex = currentParagraphIndex + 1
+            let nextTokens = tokensForParagraph(text: nextTrimmed, at: nextParagraphIndex)
 
             let nextFont: NSFont
             if nextCodeBlockStatus != .notInCodeBlock {
