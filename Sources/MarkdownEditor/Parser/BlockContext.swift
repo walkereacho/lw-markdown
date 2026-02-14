@@ -1,5 +1,12 @@
 import Foundation
 
+/// Classifies a paragraph's role within a fenced code block for O(1) lookup.
+enum ParagraphCodeBlockStatus {
+    case openingFence(language: String?)
+    case closingFence
+    case inside(language: String?)
+}
+
 /// Identifies regions where paragraph-independence doesn't hold.
 ///
 /// Some Markdown constructs span multiple paragraphs (fenced code blocks).
@@ -10,6 +17,31 @@ struct BlockContext {
     /// `start` is the opening fence, `end` is the closing fence (or last content line if unclosed).
     /// `isClosed` indicates whether the block has an actual closing fence.
     var fencedCodeBlocks: [(start: Int, end: Int, language: String?, isClosed: Bool)] = []
+
+    /// Pre-computed dictionary for O(1) paragraph code-block status lookup.
+    private(set) var paragraphStatusLookup: [Int: ParagraphCodeBlockStatus] = [:]
+
+    /// Build the O(1) lookup dictionary from the current `fencedCodeBlocks` array.
+    /// Must be called after any mutation of `fencedCodeBlocks`.
+    mutating func buildLookup() {
+        paragraphStatusLookup.removeAll()
+        for block in fencedCodeBlocks {
+            paragraphStatusLookup[block.start] = .openingFence(language: block.language)
+            if block.isClosed {
+                paragraphStatusLookup[block.end] = .closingFence
+            }
+            let contentEnd = block.isClosed ? block.end : block.end + 1
+            for i in (block.start + 1)..<contentEnd {
+                paragraphStatusLookup[i] = .inside(language: block.language)
+            }
+        }
+    }
+
+    /// O(1) lookup for a paragraph's code-block status.
+    /// Returns nil if the paragraph is not part of any code block.
+    func codeBlockStatus(paragraphIndex: Int) -> ParagraphCodeBlockStatus? {
+        return paragraphStatusLookup[paragraphIndex]
+    }
 
     /// Check if a paragraph is inside a fenced code block (not on boundary).
     func isInsideFencedCodeBlock(paragraphIndex: Int) -> (Bool, String?) {

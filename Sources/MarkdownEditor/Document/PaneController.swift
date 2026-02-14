@@ -115,13 +115,14 @@ final class PaneController: NSObject {
         defer { isInitializing = false }
 
         // Update block context FIRST so we know which paragraphs are code blocks
+        var paragraphs: [String] = []
         PerfTimer.shared.measure("init.blockContext") {
-            updateBlockContextFull()
+            paragraphs = updateBlockContextFull()
         }
 
         // Apply fonts for all paragraph types so TextKit 2 calculates correct metrics (O(N) on load only)
         PerfTimer.shared.measure("init.applyFonts") {
-            applyFontsToAllParagraphs()
+            applyFontsToAllParagraphs(paragraphs: paragraphs)
         }
 
         // Set initial active paragraph to 0 (cursor starts at beginning)
@@ -185,10 +186,13 @@ final class PaneController: NSObject {
 
 
     /// Update block context by scanning all paragraphs. O(N) - for initialization only.
-    private func updateBlockContextFull() {
-        guard let text = textView.textStorage?.string else { return }
+    /// Returns the paragraphs array so callers can reuse it (avoids redundant splitting).
+    @discardableResult
+    private func updateBlockContextFull() -> [String] {
+        guard let text = textView.textStorage?.string else { return [] }
         let paragraphs = text.components(separatedBy: "\n")
         layoutDelegate.updateBlockContext(paragraphs: paragraphs)
+        return paragraphs
     }
 
     deinit {
@@ -243,7 +247,8 @@ final class PaneController: NSObject {
 
     /// Apply fonts to ALL paragraphs based on their type. O(N) - only for initialization.
     /// Handles headings, code blocks, blockquotes, and lists.
-    private func applyFontsToAllParagraphs() {
+    /// - Parameter paragraphs: Pre-split paragraph array. If nil, splits the text storage string.
+    private func applyFontsToAllParagraphs(paragraphs providedParagraphs: [String]? = nil) {
         guard !isApplyingHeadingFonts else { return }
         guard let document = document,
               let textStorage = textView.textStorage else { return }
@@ -263,8 +268,8 @@ final class PaneController: NSObject {
         let fullRange = NSRange(location: 0, length: textStorage.length)
         textStorage.addAttribute(.font, value: theme.bodyFont, range: fullRange)
 
-        // Apply fonts based on paragraph type
-        let paragraphs = text.components(separatedBy: "\n")
+        // Reuse provided paragraphs or split text
+        let paragraphs = providedParagraphs ?? text.components(separatedBy: "\n")
         var offset = 0
 
         for (index, para) in paragraphs.enumerated() {
@@ -274,13 +279,10 @@ final class PaneController: NSObject {
                 continue
             }
 
-            // Check if this paragraph is part of a code block
-            let isCodeBlockContent = blockContext.isInsideFencedCodeBlock(paragraphIndex: index).0
-            let isOpeningFence = blockContext.isOpeningFence(paragraphIndex: index).0
-            let isClosingFence = blockContext.isClosingFence(paragraphIndex: index)
-
-            if isCodeBlockContent || isOpeningFence || isClosingFence {
-                // Code block: apply monospace font
+            // O(1) lookup: check if this paragraph is part of a code block
+            if let status = blockContext.codeBlockStatus(paragraphIndex: index) {
+                // Code block paragraph (content, opening fence, or closing fence): apply monospace font
+                _ = status  // All statuses get the same font treatment
                 textStorage.addAttribute(.font, value: theme.codeFont, range: range)
             } else {
                 // Parse for other block-level elements (cached)

@@ -45,6 +45,7 @@ final class BlockContextScanner {
             ))
         }
 
+        context.buildLookup()
         return context
     }
 
@@ -123,5 +124,7 @@ final class BlockContextScanner {
 
         // Sort by start index
         context.fencedCodeBlocks.sort { $0.start < $1.start }
+
+        context.buildLookup()
     }
 }
