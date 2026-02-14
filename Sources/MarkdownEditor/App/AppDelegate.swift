@@ -8,6 +8,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Required for programmatic AppKit apps to appear in Dock and show windows
         NSApp.setActivationPolicy(.regular)
 
+        // Pre-warm Highlightr's JSContext (~50ms) before any rendering.
+        // Without this, the first code block draw during scroll spikes to 52ms.
+        _ = SyntaxHighlighter.shared.highlight(code: " ", language: "swift")
+
         setupMainMenu()
         openNewWindow()
 
