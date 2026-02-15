@@ -1,18 +1,27 @@
 # MarkdownEditor
 
-A native macOS Markdown editor built with Swift and AppKit. Features a hybrid WYSIWYG approach where the active paragraph shows raw Markdown syntax while inactive paragraphs display beautifully formatted text.
+A macOS Markdown editor built with Swift, AppKit, and TextKit 2. It uses a hybrid approach where the paragraph you're editing shows raw Markdown syntax and the rest show formatted text — similar to how Typora or iA Writer handle things, but simpler.
 
-Built on TextKit 2, requiring macOS 13 (Ventura) or later.
+This is a personal project. It works for basic editing but isn't trying to compete with established editors. It's primarily an exercise in building a custom text editor on top of TextKit 2, which has its own set of challenges.
 
-## Features
+Requires macOS 13 (Ventura) or later.
 
-- **Hybrid WYSIWYG Editing** - Edit in raw Markdown when focused, see formatted output elsewhere
-- **Full Markdown Support** - Headings, bold, italic, inline code, code blocks, lists, blockquotes, and more
-- **Syntax Highlighting** - Code blocks with language-aware syntax highlighting via [Highlightr](https://github.com/raspu/Highlightr)
-- **Workspace Support** - Open folders as workspaces with a file tree sidebar
-- **Tabs** - Work with multiple documents simultaneously
-- **File Watching** - Sidebar updates automatically when files change on disk
-- **Native Performance** - Pure AppKit, no Electron, no web views
+## What it does
+
+- Headings, bold, italic, inline code, code blocks, lists, blockquotes
+- Syntax highlighting in code blocks via [Highlightr](https://github.com/raspu/Highlightr)
+- Workspace sidebar with file tree
+- Tabs for multiple documents
+- File watching (sidebar updates when files change on disk)
+- Inline comments with a toggleable sidebar — comments are anchored to text and persisted in `.comments.json` files alongside your documents
+
+## What it doesn't do (yet, or maybe ever)
+
+- No export to HTML/PDF
+- No vim mode, no plugin system
+- Markdown coverage is incomplete — no tables, no footnotes, no task lists
+- Undo can be flaky in edge cases
+- Large files haven't been stress-tested much
 
 ## Requirements
 
@@ -73,22 +82,16 @@ A workspace is a folder containing Markdown files. When opened, the sidebar show
 | Open File | `Cmd+O` |
 | Save | `Cmd+S` |
 | Save As | `Cmd+Shift+S` |
+| Add Comment | `Cmd+Option+M` |
 | Undo | `Cmd+Z` |
 | Redo | `Cmd+Shift+Z` |
 | Quit | `Cmd+Q` |
 
-## How It Works
+## How it works
 
-MarkdownEditor uses a **layout-based rendering architecture**:
+The raw Markdown stays unmodified in `NSTextContentStorage`. A parser tokenizes each paragraph, and custom `NSTextLayoutFragment` subclasses handle rendering. The paragraph under the cursor shows syntax characters (like `#`, `*`, `` ` ``) with muted styling; everything else hides the syntax and shows formatted text.
 
-1. Raw Markdown text is stored unmodified in `NSTextContentStorage`
-2. The parser tokenizes each paragraph into `MarkdownToken` elements
-3. Each editor pane tracks which paragraph is "active" (cursor present)
-4. Custom `NSTextLayoutFragment` subclasses render:
-   - **Active paragraphs**: Show syntax characters (like `#`, `*`, `` ` ``) with muted styling
-   - **Inactive paragraphs**: Hide syntax, show formatted text
-
-This gives you the best of both worlds: see exactly what you're typing while editing, but enjoy clean formatted output everywhere else.
+Most of the complexity lives in keeping cursor positioning correct — TextKit 2 calculates cursor position from font attributes in storage, not from what you draw, so the two have to stay in sync.
 
 ## Testing
 
@@ -123,6 +126,11 @@ The app supports CLI arguments for automated testing:
 | `--test-file <path>` | Load a Markdown file on startup | `--test-file Tests/Fixtures/headings.md` |
 | `--window-size <WxH>` | Set window dimensions | `--window-size 1200x800` |
 | `--cursor-line <N>` | Position cursor at line N | `--cursor-line 10` |
+| `--perf-scroll-test` | Run automated scroll profiling | |
+| `--perf-type-test` | Run automated typing profiling | |
+| `--type-count <N>` | Character count for typing test | `--type-count 500` |
+
+Performance results are logged to `/tmp/markdowneditor-perf.log`.
 
 ### Test Fixtures
 
@@ -173,10 +181,6 @@ Sources/MarkdownEditor/
 ├── Protocols/              # Core interfaces
 └── Stubs/                  # Test doubles
 ```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ## License
 
