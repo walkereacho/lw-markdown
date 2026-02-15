@@ -65,6 +65,10 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
     /// Shared across all call sites (willProcessEditing, applyFontsToAllParagraphs, fragment creation).
     private let tokenCache = MarkdownTokenCache()
 
+    /// Block context for O(1) code block status lookups.
+    /// Synced from PaneController after each block context update.
+    var blockContext = BlockContext()
+
     /// Document revision counter — incremented on every edit.
     private(set) var revision: UInt64 = 0
 
@@ -285,12 +289,21 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         let paragraphText = (text as NSString).substring(with: paragraphRange)
         let trimmedText = paragraphText.trimmingCharacters(in: .newlines)
 
-        // Check if this paragraph is inside a code block
-        let codeBlockStatus = detectCodeBlockStatus(at: paragraphRange.location, in: text)
-
         // Compute paragraph index via binary search over cached ranges (O(log N)).
         let currentParagraphIndex = paragraphCache.paragraphIndex(forCharacterOffset: paragraphRange.location)
             ?? text.prefix(paragraphRange.location).filter { $0 == "\n" }.count
+
+        // Check if this paragraph is inside a code block — O(1) dictionary lookup
+        let codeBlockStatus: CodeBlockStatus
+        if let status = blockContext.codeBlockStatus(paragraphIndex: currentParagraphIndex) {
+            switch status {
+            case .openingFence: codeBlockStatus = .openingFence
+            case .closingFence: codeBlockStatus = .closingFence
+            case .inside: codeBlockStatus = .insideCodeBlock
+            }
+        } else {
+            codeBlockStatus = .notInCodeBlock
+        }
 
         // Parse to determine current paragraph type (only if not in code block)
         let tokens = tokensForParagraph(text: trimmedText, at: currentParagraphIndex)
@@ -408,8 +421,17 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
             let nextTrimmed = nextParagraphText.trimmingCharacters(in: .newlines)
             guard !nextTrimmed.isEmpty else { return }
 
-            let nextCodeBlockStatus = detectCodeBlockStatus(at: nextParagraphRange.location, in: text)
             let nextParagraphIndex = currentParagraphIndex + 1
+            let nextCodeBlockStatus: CodeBlockStatus
+            if let nextStatus = blockContext.codeBlockStatus(paragraphIndex: nextParagraphIndex) {
+                switch nextStatus {
+                case .openingFence: nextCodeBlockStatus = .openingFence
+                case .closingFence: nextCodeBlockStatus = .closingFence
+                case .inside: nextCodeBlockStatus = .insideCodeBlock
+                }
+            } else {
+                nextCodeBlockStatus = .notInCodeBlock
+            }
             let nextTokens = tokensForParagraph(text: nextTrimmed, at: nextParagraphIndex)
 
             let nextFont: NSFont
@@ -500,48 +522,6 @@ final class DocumentModel: NSObject, NSTextStorageDelegate {
         case blockquote
         case unorderedList(depth: Int)
         case orderedList(depth: Int)
-    }
-
-    /// Detect if the given character offset is inside a code block.
-    /// Scans from document start to determine fence state.
-    private func detectCodeBlockStatus(at offset: Int, in text: String) -> CodeBlockStatus {
-        let paragraphs = text.components(separatedBy: "\n")
-
-        // Find which paragraph index contains this offset
-        var currentOffset = 0
-        var targetParagraphIndex = 0
-        for (i, para) in paragraphs.enumerated() {
-            let paraLength = para.count + 1 // +1 for newline
-            if currentOffset + paraLength > offset {
-                targetParagraphIndex = i
-                break
-            }
-            currentOffset += paraLength
-        }
-
-        // Scan paragraphs to determine code block state
-        var inCodeBlock = false
-
-        for i in 0..<paragraphs.count {
-            let trimmed = paragraphs[i].trimmingCharacters(in: .whitespaces)
-            let isFence = trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~")
-
-            if i == targetParagraphIndex {
-                // This is the paragraph we're checking
-                if isFence {
-                    return inCodeBlock ? .closingFence : .openingFence
-                } else {
-                    return inCodeBlock ? .insideCodeBlock : .notInCodeBlock
-                }
-            }
-
-            // Update state for next iteration
-            if isFence {
-                inCodeBlock = !inCodeBlock
-            }
-        }
-
-        return .notInCodeBlock
     }
 
     /// Detect previous paragraph type from its font and paragraph style.

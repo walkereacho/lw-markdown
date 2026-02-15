@@ -57,6 +57,9 @@ final class PaneController: NSObject {
     /// firing before it runs are redundant and cause O(N) font passes to multiply.
     private var isInitializing = true
 
+    /// Paragraph count at last block context update, for detecting insertions/deletions.
+    private var lastBlockContextParagraphCount = 0
+
     // MARK: - Initialization
 
     init(document: DocumentModel, frame: NSRect) {
@@ -119,6 +122,9 @@ final class PaneController: NSObject {
         PerfTimer.shared.measure("init.blockContext") {
             paragraphs = updateBlockContextFull()
         }
+        // Sync block context to document for O(1) lookups in willProcessEditing
+        document?.blockContext = layoutDelegate.blockContext
+        lastBlockContextParagraphCount = document?.paragraphCount ?? 0
 
         // Apply fonts for all paragraph types so TextKit 2 calculates correct metrics (O(N) on load only)
         PerfTimer.shared.measure("init.applyFonts") {
@@ -147,13 +153,61 @@ final class PaneController: NSObject {
 
     /// Update block context incrementally from the edited paragraph. O(K).
     /// Compares old vs new context and invalidates paragraphs whose code-block status changed.
+    ///
+    /// Fast path: if the edited paragraph is not a fence and wasn't a fence before,
+    /// skip the entire function (no code block boundaries can change). O(1).
     private func updateBlockContext() {
         let spid = OSSignpostID(log: Signposts.layout)
         os_signpost(.begin, log: Signposts.layout, name: Signposts.blockContextUpdate, signpostID: spid)
         defer { os_signpost(.end, log: Signposts.layout, name: Signposts.blockContextUpdate, signpostID: spid) }
 
         guard let text = textView.textStorage?.string else { return }
-        let paragraphs = text.components(separatedBy: "\n")
+
+        // Early exit for non-fence edits — O(1) check avoids O(N) string split.
+        // Conditions that require a full update:
+        // 1. Paragraph count changed (newline insert/delete shifts all code block indices)
+        // 2. Current or adjacent paragraph is/was a fence boundary
+        // Check if paragraph count changed (O(1) — paragraph cache is already rebuilt)
+        let currentParagraphCount = document?.paragraphCount ?? 0
+        let paragraphCountChanged = currentParagraphCount != lastBlockContextParagraphCount
+
+        if !paragraphCountChanged,
+           let location = cursorTextLocation,
+           let editedIndex = document?.paragraphIndex(for: location) {
+            let nsText = text as NSString
+            let blockContext = layoutDelegate.blockContext
+
+            // Check current paragraph text for fence markers
+            let cursorOffset = document?.contentStorage.offset(
+                from: document!.contentStorage.documentRange.location,
+                to: location
+            ) ?? 0
+            let paragraphRange = nsText.paragraphRange(for: NSRange(location: cursorOffset, length: 0))
+            let paragraphText = nsText.substring(with: paragraphRange)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let isFenceNow = paragraphText.hasPrefix("```") || paragraphText.hasPrefix("~~~")
+
+            // Also check previous paragraph (handles Enter after typing ```)
+            var prevIsFence = false
+            if editedIndex > 0, paragraphRange.location > 0 {
+                let prevRange = nsText.paragraphRange(for: NSRange(location: paragraphRange.location - 1, length: 0))
+                let prevText = nsText.substring(with: prevRange).trimmingCharacters(in: .whitespacesAndNewlines)
+                prevIsFence = prevText.hasPrefix("```") || prevText.hasPrefix("~~~")
+            }
+
+            // Check if any of the involved paragraphs were fence boundaries before
+            let wasFenceBefore = blockContext.isFenceBoundary(paragraphIndex: editedIndex) ||
+                (editedIndex > 0 && blockContext.isFenceBoundary(paragraphIndex: editedIndex - 1))
+
+            if !isFenceNow && !prevIsFence && !wasFenceBefore {
+                // No fence involvement — block context cannot change
+                return
+            }
+        }
+
+        let paragraphs = PerfTimer.shared.measure("bc.split") {
+            text.components(separatedBy: "\n")
+        }
 
         // Capture old block context before updating
         let oldBlockContext = layoutDelegate.blockContext
@@ -173,13 +227,27 @@ final class PaneController: NSObject {
         // unreliable after insertions/deletions shift paragraph indices. When any code block
         // boundary changes, reapply fonts to all paragraphs to ensure correctness.
         let newBlockContext = layoutDelegate.blockContext
-        let affectedParagraphs = newBlockContext.paragraphsWithChangedCodeBlockStatus(
-            comparedTo: oldBlockContext,
-            paragraphCount: paragraphs.count
-        )
+        let affectedParagraphs = PerfTimer.shared.measure("bc.diffStatus") {
+            newBlockContext.paragraphsWithChangedCodeBlockStatus(
+                comparedTo: oldBlockContext,
+                paragraphCount: paragraphs.count
+            )
+        }
+
+        // Sync block context to document for O(1) lookups in willProcessEditing
+        document?.blockContext = layoutDelegate.blockContext
+        lastBlockContextParagraphCount = document?.paragraphCount ?? 0
 
         if !affectedParagraphs.isEmpty {
-            applyFontsToAllParagraphs()
+            PerfTimer.shared.measure("bc.applyFonts") {
+                if paragraphCountChanged {
+                    // Paragraph insertion/deletion shifts indices — targeted update would
+                    // miss paragraphs where text changed but status appears the same.
+                    applyFontsToAllParagraphs()
+                } else {
+                    applyFontsToSpecificParagraphs(affectedParagraphs)
+                }
+            }
             invalidateParagraphsDisplay(affectedParagraphs)
         }
     }
@@ -333,6 +401,102 @@ final class PaneController: NSObject {
         textStorage.endEditing()
     }
 
+    /// Apply fonts to specific paragraphs based on their type. O(K) where K = indices.count.
+    /// Used when code block boundaries change to avoid re-processing every paragraph.
+    private func applyFontsToSpecificParagraphs(_ indices: Set<Int>) {
+        guard !isApplyingHeadingFonts else { return }
+        guard let document = document,
+              let textStorage = textView.textStorage else { return }
+
+        isApplyingHeadingFonts = true
+        defer { isApplyingHeadingFonts = false }
+
+        let text = textStorage.string
+        guard !text.isEmpty else { return }
+
+        let theme = SyntaxTheme.default
+        let blockContext = layoutDelegate.blockContext
+
+        // Build offset map for requested indices only
+        let nsText = text as NSString
+        var paragraphOffsets: [(index: Int, offset: Int, length: Int)] = []
+        var offset = 0
+        var paragraphIndex = 0
+
+        // Walk through paragraphs, only collecting offsets for requested indices
+        while offset < nsText.length {
+            let paraRange = nsText.paragraphRange(for: NSRange(location: offset, length: 0))
+            // Paragraph text length without trailing newline
+            let textLength = paraRange.length - (offset + paraRange.length <= nsText.length &&
+                paraRange.length > 0 &&
+                nsText.character(at: offset + paraRange.length - 1) == 0x0A ? 1 : 0)
+
+            if indices.contains(paragraphIndex) {
+                paragraphOffsets.append((index: paragraphIndex, offset: offset, length: textLength))
+            }
+
+            offset += paraRange.length
+            paragraphIndex += 1
+
+            // Early exit once we've found all requested paragraphs
+            if paragraphOffsets.count == indices.count { break }
+        }
+
+        textStorage.beginEditing()
+
+        for entry in paragraphOffsets {
+            let range = NSRange(location: entry.offset, length: entry.length)
+            guard range.location + range.length <= textStorage.length, range.length > 0 else { continue }
+
+            let para = nsText.substring(with: NSRange(location: entry.offset, length: entry.length))
+
+            if let status = blockContext.codeBlockStatus(paragraphIndex: entry.index) {
+                _ = status
+                textStorage.addAttribute(.font, value: theme.codeFont, range: range)
+            } else {
+                // Reset to body font first
+                textStorage.addAttribute(.font, value: theme.bodyFont, range: range)
+
+                let tokens = document.tokensForParagraph(text: para, at: entry.index)
+                var isBlockElement = false
+
+                for token in tokens {
+                    switch token.element {
+                    case .heading(let level):
+                        let font = theme.headingFonts[level] ?? theme.bodyFont
+                        textStorage.addAttribute(.font, value: font, range: range)
+                        isBlockElement = true
+
+                    case .blockquote:
+                        textStorage.addAttribute(.font, value: theme.italicFont, range: range)
+                        let blockquoteStyle = NSMutableParagraphStyle()
+                        blockquoteStyle.headIndent = 20.0
+                        blockquoteStyle.firstLineHeadIndent = 0
+                        textStorage.addAttribute(.paragraphStyle, value: blockquoteStyle, range: range)
+                        isBlockElement = true
+
+                    case .unorderedListItem, .orderedListItem:
+                        let listStyle = NSMutableParagraphStyle()
+                        listStyle.firstLineHeadIndent = listIndent
+                        listStyle.headIndent = listIndent
+                        textStorage.addAttribute(.paragraphStyle, value: listStyle, range: range)
+                        isBlockElement = false
+
+                    default:
+                        break
+                    }
+                    if isBlockElement { break }
+                }
+
+                if !isBlockElement {
+                    theme.applyInlineFormattingFonts(to: textStorage, tokens: tokens, paragraphOffset: entry.offset)
+                }
+            }
+        }
+
+        textStorage.endEditing()
+    }
+
     // MARK: - Active Paragraph
 
     /// Check if a paragraph is active in THIS pane.
@@ -477,7 +641,9 @@ extension PaneController: NSTextViewDelegate {
 
         // Notify document of content change for cache invalidation
         let range = document?.contentStorage.documentRange ?? layoutManager.documentRange
-        document?.contentDidChange(in: range, changeInLength: 0)
+        PerfTimer.shared.measure("tdc.contentDidChange") {
+            document?.contentDidChange(in: range, changeInLength: 0)
+        }
 
         // Note: Heading fonts are now applied in DocumentModel.willProcessEditing
         // BEFORE TextKit 2 creates layout fragments, ensuring correct metrics.

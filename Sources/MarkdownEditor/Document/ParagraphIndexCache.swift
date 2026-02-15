@@ -81,10 +81,12 @@ final class ParagraphIndexCache {
     // MARK: - Cache Updates
 
     /// Handle document edit by rebuilding cache.
-    /// A production implementation would do incremental updates,
-    /// but full rebuild is correct and simpler for scaffolding.
+    /// Note: contentDidChange() passes delta=0 and the full document range,
+    /// so incremental updates aren't possible without threading actual edit info.
     func didProcessEditing(in editedRange: NSTextRange, changeInLength delta: Int) {
-        rebuildFull()
+        PerfTimer.shared.measure("cache.rebuildFull") {
+            rebuildFull()
+        }
     }
 
     /// Rebuild entire cache by enumerating paragraphs.

@@ -191,9 +191,19 @@ Active paragraphs show formatted text (bold, italic) WITH syntax visible:
 - Apply muted color to syntax ranges
 - Keeps visual feedback while editing
 
-## Test Fixtures
+## Testing
 
-Test fixtures in `Tests/Fixtures/` cover headings, lists, code blocks, blockquotes, inline formatting, and edge cases (empty files, long lines, deep nesting).
+See **[docs/testing-guide.md](docs/testing-guide.md)** for the full rendering correctness testing guide.
+
+### Key rules
+- **Production path for setup, independent re-derivation for verification.** The test harness uses `initializeAfterContentLoad()` (same as production) for setup, then independently re-derives expected state from raw text for assertions.
+- **Don't mock production components.** The harness uses real DocumentModel, PaneController, and NSTextView.
+- **Don't replicate production init logic in tests.** Use production entry points, not manual step sequences.
+- **Always call `assertAllParagraphsConsistent` after mutations.** It re-derives expected state across all three layers (BlockContext, font-storage, fragment tokens).
+
+### Test fixtures
+
+Fixtures in `Tests/Fixtures/` cover headings, lists, code blocks, blockquotes, inline formatting, and edge cases (empty files, long lines, deep nesting).
 
 ## CLI Arguments (E2E Testing)
 

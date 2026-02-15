@@ -43,6 +43,19 @@ struct BlockContext {
         return paragraphStatusLookup[paragraphIndex]
     }
 
+    /// Collect all paragraph indices that are part of any code block (fences + content).
+    /// Used as fallback when paragraphStatusLookup hasn't been built.
+    private func allCodeBlockParagraphIndices() -> Set<Int> {
+        var indices = Set<Int>()
+        for block in fencedCodeBlocks {
+            let end = block.isClosed ? block.end : block.end
+            for i in block.start...end {
+                indices.insert(i)
+            }
+        }
+        return indices
+    }
+
     /// Check if a paragraph is inside a fenced code block (not on boundary).
     func isInsideFencedCodeBlock(paragraphIndex: Int) -> (Bool, String?) {
         for block in fencedCodeBlocks {
@@ -101,25 +114,48 @@ struct BlockContext {
     }
 
     /// Identifies paragraphs whose code-block status changed between two contexts.
+    /// O(K) where K = number of paragraphs in code blocks (not total paragraph count).
+    ///
+    /// Fast path: if fencedCodeBlocks arrays are identical, returns empty set in O(B).
+    /// Slow path: iterates union of paragraphStatusLookup keys from both contexts.
     ///
     /// - Parameters:
     ///   - other: The previous block context to compare against.
-    ///   - paragraphCount: Total number of paragraphs in the document.
+    ///   - paragraphCount: Total number of paragraphs in the document (unused in fast path).
     /// - Returns: Set of paragraph indices where code-block status changed.
     func paragraphsWithChangedCodeBlockStatus(
         comparedTo other: BlockContext,
         paragraphCount: Int
     ) -> Set<Int> {
-        var changed = Set<Int>()
-        for i in 0..<paragraphCount {
-            let wasInBlock = other.isInsideFencedCodeBlock(paragraphIndex: i).0 ||
-                             other.isFenceBoundary(paragraphIndex: i)
-            let isInBlock = self.isInsideFencedCodeBlock(paragraphIndex: i).0 ||
-                            self.isFenceBoundary(paragraphIndex: i)
-            if wasInBlock != isInBlock {
-                changed.insert(i)
+        // Fast path: compare fencedCodeBlocks arrays directly
+        if fencedCodeBlocks.count == other.fencedCodeBlocks.count {
+            var identical = true
+            for (a, b) in zip(fencedCodeBlocks, other.fencedCodeBlocks) {
+                if a.start != b.start || a.end != b.end || a.isClosed != b.isClosed {
+                    identical = false
+                    break
+                }
             }
+            if identical { return [] }
         }
-        return changed
+
+        // Slow path: iterate union of all code-block paragraph indices
+        // Use lookups if available, otherwise build sets from fencedCodeBlocks directly
+        let selfIndices: Set<Int>
+        let otherIndices: Set<Int>
+
+        if !self.paragraphStatusLookup.isEmpty || self.fencedCodeBlocks.isEmpty {
+            selfIndices = Set(self.paragraphStatusLookup.keys)
+        } else {
+            selfIndices = self.allCodeBlockParagraphIndices()
+        }
+
+        if !other.paragraphStatusLookup.isEmpty || other.fencedCodeBlocks.isEmpty {
+            otherIndices = Set(other.paragraphStatusLookup.keys)
+        } else {
+            otherIndices = other.allCodeBlockParagraphIndices()
+        }
+
+        return selfIndices.symmetricDifference(otherIndices)
     }
 }
